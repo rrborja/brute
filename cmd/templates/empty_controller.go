@@ -14,14 +14,20 @@
 
 package templates
 
-const EmptyController = `
-package main
+const EmptyController = `package main
 
 import (
     "fmt"
 )
 
+// Start is the main logic of your endpoint
+func Start() {
+	fmt.Println("Success!");
+}
+
+// WARNING: Do not modify beyond this line
 func main() {
-    fmt.Println("{{.Path}}")
+    go Start()
+	select {}
 }
 `

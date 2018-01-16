@@ -15,27 +15,106 @@
 package main
 
 import (
-	"log"
-	"os"
+	"bufio"
 	"errors"
-	"io/ioutil"
-	"gopkg.in/yaml.v2"
+	"flag"
+	"fmt"
 	"github.com/manifoldco/promptui"
 	"github.com/rrborja/brute"
-	"html/template"
-	"bufio"
 	"github.com/rrborja/brute/cmd/templates"
+	"gopkg.in/yaml.v2"
+	"html/template"
+	"io/ioutil"
+	"log"
+	"os"
+	"strings"
+	"path/filepath"
 )
 
 const pathSeparator = string(os.PathSeparator)
 
+// brute add endpoint -name=Ritchie -path=borja
+// brute remove endpoint -name=Ritchie
+// brute update endpoint -name=Ritchie
 func main() {
-	log.Println("Checking contents...")
+	if err := ProcessArgument(os.Args[1:]...); err != nil {
+		check(err)
+	} else {
+		os.Exit(0)
+	}
+
+	fmt.Println("Checking contents...")
 	if config, err := CheckCurrentProjectFolder(); err != nil {
 		log.Fatal(err)
 	} else {
+		brute.New()
 		brute.Deploy(config)
 	}
+}
+
+func ProcessArgument(args ...string) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "add":
+		return ProcessTypeForAdd(args[1:]...)
+	case "remove":
+		return ProcessTypeForRemove(args[1:]...)
+	case "update":
+		return ProcessTypeForUpdate(args[1:]...)
+	default:
+		return fmt.Errorf("unknown command: %v", args[0])
+	}
+}
+
+func ProcessTypeForAdd(args ...string) error {
+	if len(args) == 0 {
+		return errors.New("expected additional arguments for add")
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "endpoint":
+		name := flag.String("name", "", "the name of the endpoint")
+		path := flag.String("path", "", "the URI path of the endpoint")
+
+		flag.CommandLine.Parse(args[1:])
+
+		if len(*name) == 0 {
+			*name = SetNameOfRoute()
+		}
+		if len(*path) == 0 {
+			*path = SetPathOfRoute()
+		}
+
+		config, err := CheckCurrentProjectFolder()
+		check(err)
+
+		for _, route := range config.Routes {
+			if route.Directory == *name {
+				return fmt.Errorf("cannot add an existing endpoint %v", *name)
+			}
+		}
+
+		config.Routes = append(config.Routes, brute.Route{Path: *path, Directory: *name})
+
+		CreateProjectFiles(config)
+
+		fmt.Printf("Endpoint %v successfully added\n", *name)
+	default:
+		return fmt.Errorf("unknown feature %v", args[0])
+	}
+
+	return nil
+}
+
+func ProcessTypeForRemove(args ...string) error {
+	return nil
+}
+
+func ProcessTypeForUpdate(args ...string) error {
+	return nil
 }
 
 func CheckCurrentProjectFolder() (*brute.Config, error) {
@@ -80,7 +159,7 @@ func CheckExistingValidProject(files []os.FileInfo) (*brute.Config, error) {
 }
 
 func CreateNewProject() (*brute.Config, error) {
-	defer log.Println("Setup complete!")
+	defer fmt.Println("Setup complete!")
 
 	config := &brute.Config{}
 	defer CreateProjectFiles(config)
@@ -97,61 +176,69 @@ func CreateNewProject() (*brute.Config, error) {
 		config.Name = name
 	}
 
-	{
-		prompt := promptui.Prompt{
-			Label:     "Create new route",
-			IsConfirm: true,
-			Default: "Y",
-		}
-
-		_, err := prompt.Run()
-
-		if err == nil {
-			routes := make([]brute.Route, 1)
-			for {
-				var route brute.Route
-				{
-					routePrompt := promptui.Prompt{
-						Label: "Name",
-					}
-
-					name, err := routePrompt.Run()
-					check(err)
-
-					route.Directory = name
-				}
-				{
-					routePrompt := promptui.Prompt{
-						Label: "Path",
-					}
-
-					path, err := routePrompt.Run()
-					check(err)
-
-					route.Path = path
-				}
-				routes[len(routes) - 1] = route
-
-				routePrompt := promptui.Prompt{
-					Label: "Create more routes",
-					IsConfirm: true,
-					Default: "Y",
-				}
-
-				_, err := routePrompt.Run()
-
-				if err != nil {
-					break
-				}
-
-				routes = append(routes, make([]brute.Route, 1)...)
-			}
-
-			config.Routes = routes
-		}
-	}
+	ConfigRoutes(config)
 
 	return config, nil
+}
+
+func SetNameOfRoute() string {
+	routePrompt := promptui.Prompt{
+		Label: "Name",
+	}
+
+	name, err := routePrompt.Run()
+	check(err)
+
+	return name
+}
+
+func SetPathOfRoute() string {
+	routePrompt := promptui.Prompt{
+		Label: "Path",
+	}
+
+	path, err := routePrompt.Run()
+	check(err)
+
+	return path
+}
+
+func ConfigRoutes(config *brute.Config) {
+	prompt := promptui.Prompt{
+		Label:     "Create new route",
+		IsConfirm: true,
+		Default:   "Y",
+	}
+
+	_, err := prompt.Run()
+
+	if err == nil {
+		routes := make([]brute.Route, 1)
+		for {
+			var route brute.Route
+
+			route.Directory = SetNameOfRoute()
+			route.Path = SetPathOfRoute()
+
+			routes[len(routes)-1] = route
+
+			routePrompt := promptui.Prompt{
+				Label:     "Create more routes",
+				IsConfirm: true,
+				Default:   "Y",
+			}
+
+			_, err := routePrompt.Run()
+
+			if err != nil {
+				break
+			}
+
+			routes = append(routes, make([]brute.Route, 1)...)
+		}
+
+		config.Routes = routes
+	}
 }
 
 type EmptyGoTemplate struct {
@@ -159,12 +246,19 @@ type EmptyGoTemplate struct {
 }
 
 func CreateProjectFiles(config *brute.Config) {
-	check(os.Mkdir(config.Name, 0700))
+	os.Mkdir(config.Name, 0700)
 
 	for _, route := range config.Routes {
-		check(os.Mkdir(config.Name + pathSeparator + route.Directory, 0700))
+		routeDirectory := filepath.Join(config.Name, route.Directory)
+		os.Mkdir(routeDirectory, 0700)
 
-		goFile, err := os.Create(config.Name + pathSeparator + route.Directory + pathSeparator + "main.go")
+		mainFile := filepath.Join(routeDirectory, "main.go")
+		//if that endpoint logic exists
+		if _, err := os.Stat(mainFile); err == nil {
+			continue
+		}
+
+		goFile, err := os.Create(mainFile)
 		check(err)
 
 		w := bufio.NewWriter(goFile)
@@ -178,6 +272,10 @@ func CreateProjectFiles(config *brute.Config) {
 		goFile.Close()
 	}
 
+	ModifyProjectConfig(config)
+}
+
+func ModifyProjectConfig(config *brute.Config) {
 	configData, err := yaml.Marshal(config)
 	check(err)
 

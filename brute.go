@@ -24,6 +24,8 @@ import (
 	"runtime"
 )
 
+var r *mux.Router
+
 type Config struct {
 	Name string `yaml:"name"`
 	Routes []Route `yaml:,flow`
@@ -40,13 +42,20 @@ type ControllerEndpoint struct {
 	runtimeFile string
 }
 
+func New() {
+	r = mux.NewRouter()
+}
+
 func Deploy(config *Config) {
-	r := mux.NewRouter()
 	for _, route := range config.Routes {
 		endpoint := &ControllerEndpoint{config.Name, route.Path, route.Directory}
 		r.Handle(route.Path, endpoint)
 	}
 	http.ListenAndServe(":8080", r)
+}
+
+func AddEndpoint(route *Route) {
+
 }
 
 func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
