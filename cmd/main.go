@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,21 +27,31 @@ import (
 	"html/template"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
-	"strings"
 	"path/filepath"
+	"strings"
 )
 
-const pathSeparator = string(os.PathSeparator)
+const (
+	ServiceHost = "localhost"
+	ServicePort = "11792"
+	ServiceType = "tcp"
+)
 
+// brute set remote -url="192.168.1.152"
+// brute unset remote
+// brute check remote
 // brute add endpoint -name=Ritchie -path=borja
 // brute remove endpoint -name=Ritchie
 // brute update endpoint -name=Ritchie
 func main() {
-	if err := ProcessArgument(os.Args[1:]...); err != nil {
-		check(err)
-	} else {
-		os.Exit(0)
+	if len(os.Args) > 1 {
+		if err := ProcessArgument(os.Args[1:]...); err != nil {
+			check(err)
+		} else {
+			os.Exit(0)
+		}
 	}
 
 	fmt.Println("Checking contents...")
@@ -48,15 +59,70 @@ func main() {
 		log.Fatal(err)
 	} else {
 		brute.New()
+
+		l := RunService()
+		defer l.Close()
+
+		e := brute.RunEndpointService()
+		defer e.Close()
+
+		brute.StartEndpoints(config)
+
 		brute.Deploy(config)
+
+		select {}
 	}
 }
 
-func ProcessArgument(args ...string) error {
-	if len(args) == 0 {
-		return nil
+func RunService() net.Listener {
+	l, err := net.Listen(ServiceType, ":"+ServicePort)
+	if err != nil {
+		fmt.Println("Error listening: ", err)
+		os.Exit(1)
 	}
 
+	go func() {
+		for {
+			// Listen for an incoming connection.
+			conn, err := l.Accept()
+			if err != nil {
+				fmt.Println("Error accepting: ", err.Error())
+				continue
+			}
+
+			handleInternalCommand(conn)
+		}
+	}()
+
+	return l
+}
+
+type ServiceMessage struct {
+	Command string
+}
+
+func (msg *ServiceMessage) Execute() {
+	switch msg.Command {
+	case "add-endpoint":
+	case "update-endpoint":
+	case "remove-endpoint":
+	}
+}
+
+func handleInternalCommand(c net.Conn) {
+	d := json.NewDecoder(c)
+
+	var msg ServiceMessage
+
+	err := d.Decode(&msg)
+	if err != nil {
+		log.Printf(err.Error())
+	}
+
+	c.Close()
+}
+
+func ProcessArgument(args ...string) error {
 	switch strings.ToLower(args[0]) {
 	case "add":
 		return ProcessTypeForAdd(args[1:]...)
@@ -246,10 +312,10 @@ type EmptyGoTemplate struct {
 }
 
 func CreateProjectFiles(config *brute.Config) {
-	os.Mkdir(config.Name, 0700)
+	os.Mkdir("src", 0700)
 
 	for _, route := range config.Routes {
-		routeDirectory := filepath.Join(config.Name, route.Directory)
+		routeDirectory := filepath.Join("src", route.Directory)
 		os.Mkdir(routeDirectory, 0700)
 
 		mainFile := filepath.Join(routeDirectory, "main.go")

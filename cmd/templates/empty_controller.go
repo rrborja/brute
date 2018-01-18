@@ -20,14 +20,14 @@ import (
     "fmt"
 )
 
-// Start is the main logic of your endpoint
-func Start() {
-	fmt.Println("Success!");
+// Handler is the main logic of your endpoint
+func Handler(args ...string) {
+	fmt.Println("Success!")
 }
 
 // WARNING: Do not modify beyond this line
 func main() {
-    go Start()
-	select {}
+    client.Run(Handler)
 }
+
 `
