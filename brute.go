@@ -33,6 +33,8 @@ import (
 	"encoding/binary"
 	"net/rpc"
 	"sync"
+	"encoding/hex"
+	"crypto/rand"
 )
 
 var cwd = ""
@@ -42,7 +44,7 @@ var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
 
 var r *mux.Router
 
-var endpoints map[Route]*ConnWriter
+var endpoints sync.Map
 
 var requestSession RequestSession
 
@@ -119,7 +121,6 @@ func init() {
 		log.Fatal(err)
 	}
 	cwd = _cwd
-	endpoints = make(map[Route]*ConnWriter)
 	requestSession = make(RequestSession)
 }
 
@@ -189,8 +190,11 @@ func RandomSessionId(ip string, unixSeconds int64) [32]byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, uint64(unixSeconds))
 
+	r := make([]byte, 4)
+	binary.LittleEndian.PutUint16(r, RandomNumber())
+
 	hash := sha256.New()
-	hash.Write(append([]byte(ip), b...))
+	hash.Write(append([]byte(ip), append(b, r...)...))
 
 	var finalHash [32]byte
 	copy(finalHash[:], hash.Sum(nil))
@@ -198,10 +202,24 @@ func RandomSessionId(ip string, unixSeconds int64) [32]byte {
 	return finalHash
 }
 
+func (controller *ControllerEndpoint) RedirectEndpointOnLoading(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("Endpoint "+ controller.Directory +" is still loading. Try again for a few seconds"))
+}
+
 func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sid := RandomSessionId(r.RemoteAddr, time.Now().Unix())
 
+	w.Header().Set("X-Brute-Session-ID", hex.EncodeToString(sid[:]))
+	w.Header().Set("Server", "brute.io")
+
+	if _, ok := endpoints.Load(controller.Route.Directory); !ok {
+		controller.RedirectEndpointOnLoading(w, r)
+		return
+	}
+
 	context := &ContextHolder{Stream: make(chan []byte, 100), End: make(chan bool, 1)}
+	defer close(context.End)
+
 	requestSession[sid] = context
 
 	context.Route = controller.Route
@@ -219,9 +237,11 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 	handlerArgument := strings.Join(args, " ")
 	context.RpcArguments = handlerArgument
 
-	go Delegate(w, context.Stream)
+	if endpoint, ok := endpoints.Load(controller.Route.Directory); ok {
+		endpoint.(*ConnWriter).Write(sid[:])
+	}
 
-	endpoints[controller.Route].Write(sid[:])
+	Delegate(w, context.Stream)
 
 	<- context.End
 }
@@ -229,6 +249,7 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 func StartEndpoints(config *Config) {
 	for _, route := range config.Routes {
 		fmt.Printf("Starting endpoint %s\n", route.Directory)
+
 		out := filepath.Join(cwd, "endpoints", route.Directory)
 		cmd := exec.Command(out, route.Directory)
 		cmd.Env = []string{fmt.Sprintf("ROUTE=%s", route.Directory)}
@@ -240,28 +261,7 @@ func StartEndpoints(config *Config) {
 			fmt.Printf("Could not run endpoint daemon %s", route.Directory)
 			continue
 		}
-		AddEndpointReader(route, cmd.Stdin)
-		//scanner := bufio.NewScanner(cmdOut)
-		//go func() {
-		//	for scanner.Scan() {
-		//		fmt.Println(scanner.Text())
-		//	}
-		//}()
 	}
-}
-
-func AddEndpointReader(route Route, w io.Reader) {
-	if endpoints[route] == nil {
-		endpoints[route] = &ConnWriter{Mutex: new(sync.Mutex)}
-	}
-	endpoints[route].Reader = w
-}
-
-func AddEndpointConn(route Route, c net.Conn) {
-	if endpoints[route] == nil {
-		endpoints[route] = &ConnWriter{Mutex: new(sync.Mutex)}
-	}
-	endpoints[route].Conn = c
 }
 
 func RunEndpointService() net.Listener {
@@ -304,12 +304,7 @@ func RunEndpointService() net.Listener {
 
 			fmt.Printf("Connection accepted from %s\n", routeDirectory)
 
-			for route := range endpoints {
-				if route.Directory == routeDirectory {
-					AddEndpointConn(route, conn)
-					break
-				}
-			}
+			endpoints.Store(routeDirectory, &ConnWriter{Mutex: new(sync.Mutex), Conn: conn})
 		}
 	}()
 
@@ -323,4 +318,10 @@ func HandshakeFormat(initial []byte) bool {
 		}
 	}
 	return true
+}
+
+func RandomNumber() uint16 {
+	var number uint16
+	binary.Read(rand.Reader, binary.LittleEndian, &number)
+	return number
 }

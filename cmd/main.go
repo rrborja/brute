@@ -119,6 +119,8 @@ func handleInternalCommand(c net.Conn) {
 		log.Printf(err.Error())
 	}
 
+	//TODO: handle master server commands and signals
+
 	c.Close()
 }
 
