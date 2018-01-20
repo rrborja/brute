@@ -21,7 +21,7 @@ import (
 )
 
 // Handler is the main logic of your endpoint
-func Handler(args ...string) {
+func Handler(args map[string]string) {
 	fmt.Println("Success!")
 }
 

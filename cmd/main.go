@@ -58,7 +58,7 @@ func main() {
 	if config, err := CheckCurrentProjectFolder(); err != nil {
 		log.Fatal(err)
 	} else {
-		brute.New()
+		brute.New(config)
 
 		l := RunService()
 		defer l.Close()
@@ -69,8 +69,6 @@ func main() {
 		brute.StartEndpoints(config)
 
 		brute.Deploy(config)
-
-		select {}
 	}
 }
 

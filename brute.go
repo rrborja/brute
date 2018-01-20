@@ -16,25 +16,27 @@ package brute
 
 import (
 	"github.com/gorilla/mux"
-	"net/http"
-	"os/exec"
-	"log"
-	"os"
-	"path/filepath"
-	"runtime"
-	"fmt"
-	"io/ioutil"
-	"net"
-	"io"
-	"strings"
-	"strconv"
-	"time"
+	"github.com/rjeczalik/notify"
+
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"net/rpc"
-	"sync"
 	"encoding/hex"
-	"crypto/rand"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strconv"
+	"sync"
+	"time"
 )
 
 var cwd = ""
@@ -62,13 +64,14 @@ func (connWriter *ConnWriter) Write(data []byte) (int, error) {
 }
 
 type Config struct {
-	Name string `yaml:"name"`
-	Remote string `yaml:"remote"`
-	Routes []Route `yaml:,flow`
+	Name       string  `yaml:"name"`
+	Remote     string  `yaml:"remote"`
+	Authorizer string  `yaml:authorizer`
+	Routes     []Route `yaml:,flow`
 }
 
 type Route struct {
-	Path string `yaml:"path"`
+	Path      string `yaml:"path"`
 	Directory string `yaml:"directory"`
 }
 
@@ -80,18 +83,18 @@ type ControllerEndpoint struct {
 
 type RequestSession map[[32]byte]*ContextHolder
 type ContextHolder struct {
-	RpcArguments string
-	Stream chan []byte
-	End chan bool
+	RpcArguments map[string]string
+	Stream       chan []byte
+	End          chan bool
 	Route
 }
 
 type EchoPacket struct {
 	SessionId [32]byte
-	Body []byte
+	Body      []byte
 }
 
-func (session RequestSession) AcceptRpc(id [32]byte, ack *string) error {
+func (session RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
 	*ack = session[id].RpcArguments
 	return nil
 }
@@ -109,7 +112,7 @@ func (session RequestSession) Close(packet *EchoPacket, ack *bool) error {
 	return nil
 }
 
-func Delegate(w io.Writer, stream <- chan []byte) {
+func Delegate(w io.Writer, stream <-chan []byte) {
 	for buf := range stream {
 		w.Write(buf)
 	}
@@ -124,7 +127,11 @@ func init() {
 	requestSession = make(RequestSession)
 }
 
-func New() {
+func New(config *Config) {
+	for _, route := range config.Routes {
+		buildEndpoint(route)
+	}
+
 	r = mux.NewRouter()
 
 	addy, err := net.ResolveTCPAddr("tcp", "localhost:12000")
@@ -145,11 +152,12 @@ func CleanUp() {
 	os.Remove("endpoints")
 }
 
-func buildEndpoint(route Route) string {
+func rebuildEndpoint(route Route) string {
 	out := filepath.Join(cwd, "endpoints", route.Directory)
-	sourcefile := filepath.Join(cwd, "src", route.Directory, "main.go")
+	routeDirectory := filepath.Join(cwd, "src", route.Directory)
+	sourceFile := filepath.Join(routeDirectory, "main.go")
 
-	cmd := exec.Command(gotool, "build", "-o", out, sourcefile)
+	cmd := exec.Command(gotool, "build", "-o", out, sourceFile)
 
 	stdout, err := cmd.StderrPipe()
 	if err != nil {
@@ -161,12 +169,40 @@ func buildEndpoint(route Route) string {
 	}
 
 	reason, _ := ioutil.ReadAll(stdout)
-	fmt.Printf("%s\n", reason)
+	if len(reason) > 0 {
+		fmt.Printf("%s\n", reason)
+	}
 
 	if err := cmd.Wait(); err != nil {
 		log.Fatal(err)
 	}
-	return out
+
+	return routeDirectory
+}
+
+func buildEndpoint(route Route) {
+	sourceEndpointDirectory := rebuildEndpoint(route)
+
+	c := make(chan notify.EventInfo, 1)
+	if err := notify.Watch(sourceEndpointDirectory, c, notify.All); err != nil {
+		log.Fatal(err)
+	}
+	go func(c <-chan notify.EventInfo) {
+		for range c {
+			fmt.Printf("Attempting to restart %s due to code changes...\n", route.Directory)
+			if endpoint, ok := endpoints.Load(route.Directory); ok {
+				err := endpoint.(*ConnWriter).Close()
+				if err != nil {
+					fmt.Println(err)
+					debug.PrintStack()
+				} else {
+					endpoints.Delete(route.Directory)
+					rebuildEndpoint(route)
+					StartEndpoint(route)
+				}
+			}
+		}
+	}(c)
 }
 
 func Deploy(config *Config) {
@@ -174,12 +210,13 @@ func Deploy(config *Config) {
 	os.Mkdir("endpoints", 0700)
 
 	for _, route := range config.Routes {
-		build := buildEndpoint(route)
+		build := filepath.Join(cwd, "endpoints", route.Directory)
 
 		endpoint := &ControllerEndpoint{config.Name, route, build}
-		r.Handle(route.Path, endpoint)
+		r.Handle(route.Path, endpoint).Name(route.Directory)
 	}
-	go http.ListenAndServe(":8080", r)
+
+	http.ListenAndServe(":8080", r)
 }
 
 func AddEndpoint(route *Route) {
@@ -203,7 +240,7 @@ func RandomSessionId(ip string, unixSeconds int64) [32]byte {
 }
 
 func (controller *ControllerEndpoint) RedirectEndpointOnLoading(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Endpoint "+ controller.Directory +" is still loading. Try again for a few seconds"))
+	w.Write([]byte("Endpoint " + controller.Directory + " is still loading. Try again for a few seconds"))
 }
 
 func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -224,18 +261,8 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 
 	context.Route = controller.Route
 
-	var args []string
-
 	pathArgs := mux.Vars(r)
-	if len(pathArgs) > 0 {
-		args = append(args, "--")
-		for k, v := range pathArgs {
-			args = append(args, "-" + k + "=" + v)
-		}
-	}
-
-	handlerArgument := strings.Join(args, " ")
-	context.RpcArguments = handlerArgument
+	context.RpcArguments = pathArgs
 
 	if endpoint, ok := endpoints.Load(controller.Route.Directory); ok {
 		endpoint.(*ConnWriter).Write(sid[:])
@@ -243,24 +270,27 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 
 	Delegate(w, context.Stream)
 
-	<- context.End
+	<-context.End
 }
 
 func StartEndpoints(config *Config) {
 	for _, route := range config.Routes {
-		fmt.Printf("Starting endpoint %s\n", route.Directory)
+		StartEndpoint(route)
+	}
+}
 
-		out := filepath.Join(cwd, "endpoints", route.Directory)
-		cmd := exec.Command(out, route.Directory)
-		cmd.Env = []string{fmt.Sprintf("ROUTE=%s", route.Directory)}
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		//cmdOut, _ := cmd.StdoutPipe()
-		err := cmd.Start()
-		if err != nil {
-			fmt.Printf("Could not run endpoint daemon %s", route.Directory)
-			continue
-		}
+func StartEndpoint(route Route) {
+	fmt.Printf("Starting endpoint %s\n", route.Directory)
+
+	out := filepath.Join(cwd, "endpoints", route.Directory)
+	cmd := exec.Command(out, route.Directory)
+	cmd.Env = []string{fmt.Sprintf("ROUTE=%s", route.Directory)}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	//cmdOut, _ := cmd.StdoutPipe()
+	err := cmd.Start()
+	if err != nil {
+		fmt.Printf("Could not run endpoint daemon %s", route.Directory)
 	}
 }
 
