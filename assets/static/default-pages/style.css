@@ -1,0 +1,90 @@
+html {
+    position: relative;
+    min-height: 100%;
+}
+
+body {
+    /*background-image: url("background.jpg");*/
+    font-family: "roboto-regular", sans-serif;
+    background-color: white;
+    font-size: 1rem;
+    line-height: 1.5rem;
+
+    margin: 0 0 100px;
+    padding: 25px;
+}
+
+.main-content h1 {
+    font-family: "roboto-black", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: -.2rem;
+    font-size: 6rem;
+    line-height: 1;
+    margin-bottom: 1.2rem;
+    padding-top: 1.5rem;
+    position: relative;
+    color: #2F2F2F;
+}
+
+.main-content h1::before {
+    content: "";
+    display: block;
+    background: #ff4435;
+    width: 120px;
+    height: 3px;
+    position: absolute;
+    top: 0;
+}
+
+.main-content p {
+    max-width: 480px;
+    text-align: justify;
+    text-justify: inter-word;
+}
+
+footer {
+    color: gray;
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    min-height: 2rem;
+    font-size: 0.75rem;
+    height: 10%;
+}
+
+.row {
+    width: 90%;
+    max-width: 1170px;
+    margin: 0 auto;
+}
+
+header {
+    margin-top: 50px
+}
+
+header .logo {
+    display: table;
+    text-transform: lowercase;
+    background: linear-gradient(330deg, #85ffa4 0%, #54e07d 25%, #1e9fe0 50%, #c948e0 75%, #e05252 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    padding: 10px 0 10px 0
+}
+
+header .logo-icon {
+    display:table-cell;
+    vertical-align:middle;
+    font-size: 4rem;
+}
+
+header .logo-text {
+    vertical-align:middle;
+    font-size: 1.75rem;
+    font-weight: bold;
+}
+
+code {
+    border-radius: 5px;
+    padding: 5px;
+    background: #eeeeee;
+}

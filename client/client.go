@@ -50,7 +50,7 @@ func Out(data []byte, args ...interface{}) {
 	}
 
 	var ack bool
-	context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, data}, &ack)
+	context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, data, 200}, &ack)
 
 }
 
@@ -78,6 +78,16 @@ func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 			handler(callEvent.Arguments)
 		}(handlerSessions, handler, callEvent)
 	}
+}
+
+func SystemMessage(message string) {
+	context := handlerSessions[gid.Get()]
+
+	context.Lock()
+	defer context.Unlock()
+
+	var ack bool
+	context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, []byte(message), 700}, &ack)
 }
 
 func Run(handler func(args map[string]string)) {

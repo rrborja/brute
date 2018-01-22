@@ -39,10 +39,13 @@ import (
 	"time"
 	"github.com/elazarl/go-bindata-assetfs"
 	"github.com/rrborja/brute/assets"
+	"html/template"
 )
 
 var cwd = ""
 var gotool = filepath.Join(runtime.GOROOT(), "bin", "go")
+
+var projectName string
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
 
@@ -51,6 +54,9 @@ var r *mux.Router
 var endpoints sync.Map
 
 var requestSession RequestSession
+
+var template404Page *template.Template
+var template700Page *template.Template
 
 type ConnWriter struct {
 	io.Reader
@@ -86,7 +92,7 @@ type ControllerEndpoint struct {
 type RequestSession map[[32]byte]*ContextHolder
 type ContextHolder struct {
 	RpcArguments map[string]string
-	Stream       chan []byte
+	Stream       chan *EchoPacket
 	End          chan bool
 	Route
 }
@@ -94,6 +100,7 @@ type ContextHolder struct {
 type EchoPacket struct {
 	SessionId [32]byte
 	Body      []byte
+	Code	  int
 }
 
 type DefaultHeadersHandler struct {
@@ -101,8 +108,12 @@ type DefaultHeadersHandler struct {
 }
 
 func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
-
 	w.WriteHeader(404)
+	template404Page.Execute(w, &struct{
+		ProjectName string
+		Path string
+		RandomNoun string
+	}{projectName, r.URL.Path, "MyEndpoint"})
 }
 
 func (session RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
@@ -111,7 +122,7 @@ func (session RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) err
 }
 
 func (session RequestSession) Write(packet *EchoPacket, ack *bool) error {
-	session[packet.SessionId].Stream <- packet.Body
+	session[packet.SessionId].Stream <- packet
 	*ack = true
 	return nil
 }
@@ -123,9 +134,17 @@ func (session RequestSession) Close(packet *EchoPacket, ack *bool) error {
 	return nil
 }
 
-func Delegate(w io.Writer, stream <-chan []byte) {
+func Delegate(w http.ResponseWriter, stream <-chan *EchoPacket) {
 	for buf := range stream {
-		w.Write(buf)
+		switch buf.Code {
+		case 700:
+			template700Page.Execute(w, struct{
+				ProjectName string
+				Message string
+			}{projectName, string(buf.Body)})
+		default:
+			w.Write(buf.Body)
+		}
 	}
 }
 
@@ -136,6 +155,21 @@ func init() {
 	}
 	cwd = _cwd
 	requestSession = make(RequestSession)
+
+	loadTemplates()
+}
+
+func loadTemplates() {
+	var data []byte
+	var err error
+
+	/* Parse 404 page template */
+	data, err = assets.Asset("static/default-pages/404/404.html"); check(err)
+	template404Page, err = template.New("404 Page Template").Parse(string(data)); check(err)
+
+	/* Parse 700 page template */
+	data, err = assets.Asset("static/default-pages/700/700.html"); check(err)
+	template700Page, err = template.New("700 Page Template").Parse(string(data)); check(err)
 }
 
 func New(config *Config) {
@@ -164,13 +198,24 @@ func HostStaticFiles() {
 	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", assets))
 }
 
+func SetProjectName(name string) {
+	projectName = name
+}
+
 func CleanUp() {
 	os.Remove("endpoints")
 }
 
-func rebuildEndpoint(route Route) string {
-	out := filepath.Join(cwd, "endpoints", route.Directory)
-	routeDirectory := filepath.Join(cwd, "src", route.Directory)
+func rebuildRootEndpoint(route Route) string {
+	var out, routeDirectory string
+	if len(route.Path) > 0 {
+		out = filepath.Join(cwd, "endpoints", route.Directory)
+		routeDirectory = filepath.Join(cwd, "src", route.Directory)
+	} else {
+		out = filepath.Join(cwd, "endpoints", "root")
+		routeDirectory = filepath.Join(cwd, "src")
+	}
+
 	sourceFile := filepath.Join(routeDirectory, "main.go")
 
 	cmd := exec.Command(gotool, "build", "-o", out, sourceFile)
@@ -190,10 +235,14 @@ func rebuildEndpoint(route Route) string {
 	}
 
 	if err := cmd.Wait(); err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	return routeDirectory
+}
+
+func rebuildEndpoint(route Route) string {
+	return rebuildRootEndpoint(route)
 }
 
 func buildEndpoint(route Route) {
@@ -221,6 +270,18 @@ func buildEndpoint(route Route) {
 	}(c)
 }
 
+func HostRootEndpoint() {
+	root := Route{"", "root"}
+
+	buildEndpoint(root)
+	StartRootEndpoint(root)
+
+	source := filepath.Join(cwd, "endpoints", "root")
+	endpoint := &ControllerEndpoint{projectName, root, source}
+
+	r.Handle("/", endpoint).Name("root")
+}
+
 func Deploy(config *Config) {
 	CleanUp()
 	os.Mkdir("endpoints", 0700)
@@ -234,6 +295,8 @@ func Deploy(config *Config) {
 
 	r.NotFoundHandler = http.HandlerFunc(defaultNotFoundHandler)
 	HostStaticFiles()
+
+	HostRootEndpoint()
 
 	http.ListenAndServe(":8080", r)
 }
@@ -273,7 +336,7 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	context := &ContextHolder{Stream: make(chan []byte, 100), End: make(chan bool, 1)}
+	context := &ContextHolder{Stream: make(chan *EchoPacket, 100), End: make(chan bool, 1)}
 	defer close(context.End)
 
 	requestSession[sid] = context
@@ -298,12 +361,21 @@ func StartEndpoints(config *Config) {
 	}
 }
 
-func StartEndpoint(route Route) {
+func StartRootEndpoint(route Route) {
 	fmt.Printf("Starting endpoint %s\n", route.Directory)
 
-	out := filepath.Join(cwd, "endpoints", route.Directory)
-	cmd := exec.Command(out, route.Directory)
-	cmd.Env = []string{fmt.Sprintf("ROUTE=%s", route.Directory)}
+	var out string
+	var env string
+	if len(route.Path) > 0 {
+		out = filepath.Join(cwd, "endpoints", route.Directory)
+		env = fmt.Sprintf("ROUTE=%s", route.Directory)
+	} else {
+		out = filepath.Join(cwd, "endpoints", "root")
+		env = fmt.Sprintf("ROUTE=%s", "root")
+	}
+
+	cmd := exec.Command(out)
+	cmd.Env = []string{env}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	//cmdOut, _ := cmd.StdoutPipe()
@@ -311,6 +383,10 @@ func StartEndpoint(route Route) {
 	if err != nil {
 		fmt.Printf("Could not run endpoint daemon %s", route.Directory)
 	}
+}
+
+func StartEndpoint(route Route) {
+	StartRootEndpoint(route)
 }
 
 func RunEndpointService() net.Listener {
@@ -373,4 +449,10 @@ func RandomNumber() uint16 {
 	var number uint16
 	binary.Read(rand.Reader, binary.LittleEndian, &number)
 	return number
+}
+
+func check(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
 }

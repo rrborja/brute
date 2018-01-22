@@ -60,6 +60,8 @@ func main() {
 	} else {
 		brute.New(config)
 
+		brute.SetProjectName(config.Name)
+
 		l := RunService()
 		defer l.Close()
 
