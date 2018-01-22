@@ -67,7 +67,6 @@ func main() {
 		defer e.Close()
 
 		brute.StartEndpoints(config)
-
 		brute.Deploy(config)
 	}
 }

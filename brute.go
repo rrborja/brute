@@ -37,6 +37,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"github.com/elazarl/go-bindata-assetfs"
+	"github.com/rrborja/brute/assets"
 )
 
 var cwd = ""
@@ -94,6 +96,15 @@ type EchoPacket struct {
 	Body      []byte
 }
 
+type DefaultHeadersHandler struct {
+	http.Handler
+}
+
+func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
+
+	w.WriteHeader(404)
+}
+
 func (session RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
 	*ack = session[id].RpcArguments
 	return nil
@@ -146,6 +157,11 @@ func New(config *Config) {
 
 	rpc.Register(requestSession)
 	go rpc.Accept(inbound)
+}
+
+func HostStaticFiles() {
+	assets := http.FileServer(&assetfs.AssetFS{Asset: assets.Asset, AssetDir: assets.AssetDir, AssetInfo: assets.AssetInfo, Prefix: "static"})
+	r.PathPrefix("/static/").Handler(http.StripPrefix("/static/", assets))
 }
 
 func CleanUp() {
@@ -215,6 +231,9 @@ func Deploy(config *Config) {
 		endpoint := &ControllerEndpoint{config.Name, route, build}
 		r.Handle(route.Path, endpoint).Name(route.Directory)
 	}
+
+	r.NotFoundHandler = http.HandlerFunc(defaultNotFoundHandler)
+	HostStaticFiles()
 
 	http.ListenAndServe(":8080", r)
 }

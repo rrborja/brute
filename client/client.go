@@ -42,6 +42,9 @@ func Out(data []byte, args ...interface{}) {
 	// use runtime.Caller to restrict calling this method only the endpoint's handler source code
 	context := handlerSessions[gid.Get()]
 
+	context.Lock()
+	defer context.Unlock()
+
 	if len(args) > 0 {
 		data = []byte(fmt.Sprintf(string(data), args))
 	}
