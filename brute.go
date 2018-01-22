@@ -298,7 +298,23 @@ func Deploy(config *Config) {
 
 	HostRootEndpoint()
 
-	http.ListenAndServe(":8080", r)
+	srv := &http.Server{Addr: ":80", Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
+		target := "https://" + req.Host + req.URL.Path
+		if len(req.URL.RawQuery) > 0 {
+			target += "?" + req.URL.RawQuery
+		}
+		fmt.Println(target)
+		w.Header().Set("server", "brute.io")
+		w.Header().Add("X-comment", "You must use HTTPS next time.")
+		http.Redirect(w, req, target,
+			http.StatusTemporaryRedirect)
+	})}
+
+	srv.SetKeepAlivesEnabled(true)
+
+	go srv.ListenAndServe()
+
+	http.ListenAndServeTLS(":443", "cert.pem", "tls.key", r)
 }
 
 func AddEndpoint(route *Route) {
