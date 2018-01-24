@@ -51,6 +51,11 @@ func (element Element) Class(value string) *AfterIdElement {
 	return e.Class(value)
 }
 
+func (element Element) Value(value interface{}) string {
+	e := AfterIdElement(element)
+	return e.Value(value)
+}
+
 func (element *AfterIdElement) Class(value string) *AfterIdElement {
 	class := attribs.Class(value)
 	element.Class_ = append(element.Class_, class)
@@ -61,8 +66,6 @@ func (element *AfterIdElement) Attributes(attribs ...Attr) *AfterIdElement {
 	element.Attributes_ = attribs
 	return element
 }
-
-var root = &RenderStack{child: make([]*RenderStack, 0)}
 
 type content struct {
 	value interface{}
@@ -75,10 +78,14 @@ func (c content) String() string {
 
 // Union-like C++ Equivalent
 type RenderStack struct {
-	*content
+	begin string
+	content string
+	end string
 
-	child []*RenderStack
+	next *RenderStack
 }
+
+var root = new(RenderStack)
 
 func attribPack(tag Tag, id *attribs.Id, classes []attribs.Class, attrs []Attr) func() (Tag, *attribs.Id, []attribs.Class, []Attr) {
 	return func() (Tag, *attribs.Id, []attribs.Class, []Attr) {
@@ -86,34 +93,26 @@ func attribPack(tag Tag, id *attribs.Id, classes []attribs.Class, attrs []Attr) 
 	}
 }
 
-func Queue(value RenderElement) {
-	switch val := value.Content.(type) {
-	case func():
-		prev := root
-		root = &RenderStack{child: make([]*RenderStack, 0)}
-		val()
-		prev.child = root.child
-		root = prev
-	default:
-		root.child = append(root.child, &RenderStack{content: &content{value.Content,
-		attribPack(value.Tag, value.Id_, value.Class_, value.Attributes_),
-		}})
-	}
+type ListElement Element
+
+func (element ListElement) Value(items ...interface{}) string {
+	e := AfterIdElement(element)
+	return e.Value(func() {
+		for _, item := range items {
+			element := new(Element)
+			element.Tag = Tag{Name: li}
+			element.Value(item)
+		}
+	})
 }
 
 type RenderElement struct {
 	*AfterIdElement
 }
 
-func (element *AfterIdElement) Value(value interface{}) *RenderElement {
+func (element *AfterIdElement) Value(value interface{}) string {
 	element.Content = value
-	e := RenderElement{element}
-	Queue(e)
-	return &e
-}
-
-func (element *RenderElement) Render() string {
-	return evaluate(element.Tag, element.Id_, element.Class_, element.Attributes_)
+	return evaluate(Element(*element))
 }
 
 type TagAttr interface {
@@ -238,7 +237,26 @@ func Div() *Element {
 	return element
 }
 
+func UnorderedList() *ListElement {
+	element := new(ListElement)
+	element.Tag = Tag{Name: ul}
+	return element
+}
+
+func OrderedList() *ListElement {
+	element := new(ListElement)
+	element.Tag = Tag{Name: ol}
+	return element
+}
+
+//func Item() *Element {
+//
+//}
+
 func Escape(content string) string {
+	content = strings.Replace(content,"<", "&lt;", -1)
+	content = strings.Replace(content, ">", "&gt;", -1)
+	content = strings.Replace(content, "&", "&amp;", -1)
 	return content
 }
 
@@ -260,28 +278,46 @@ func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []At
 		initial = strings.Join(append([]string{initial}, entry), " ")
 	}
 
-	return fmt.Sprintf("<%s %s %s>", tag.Name, initial, joinAttrs(attribs...))
+	return fmt.Sprintf("<%s%s%s>", tag.Name, initial, joinAttrs(attribs...))
 }
 
 func renderEndTag(tag Tag) string {
 	return "</" + string(tag.Name) + ">"
 }
 
-func evaluate(tag Tag, id *attribs.Id, class []attribs.Class, attribs []Attr) string {
-	begin := renderBeginTag(tag, id, class, attribs)
+func evaluate(element Element) string {
+	tag := element.Tag
+	id := element.Id_
+	classes := element.Class_
+	attribs := element.Attributes_
+
+	begin := renderBeginTag(tag, id, classes, attribs)
 	end := renderEndTag(tag)
 
-	if root.child != nil {
-		value := make([]string, len(root.child))
-		for _, node := range root.child {
-			prev := root
-			root = node
-			value = append(value, evaluate(node.attribs()))
-			root = prev
-		}
-		return begin + strings.Join(value, "") + end
-	} else {
-		return begin + fmt.Sprintf("%s", *(root.content)) + end
+	switch val := element.Content.(type) {
+	case func():
+		root.begin = begin
+		root.next = new(RenderStack)
+
+		prev := root
+		root = root.next
+
+		val()
+
+		result := begin + root.content + end
+
+		root = prev
+		root.end = begin
+		root.content =  string(append([]byte(root.content), result...))
+
+		return result
+	default:
+		result := begin + Escape(fmt.Sprintf("%s", val)) + end
+		root.content = string(append([]byte(root.content), result...))
+
+
+
+		return result
 	}
 }
 

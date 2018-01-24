@@ -22,5 +22,9 @@ type HtmlTag string
 
 
 var (
+	body HtmlTag = "body"
 	div HtmlTag = "div"
+	ul HtmlTag = "ul"
+	ol HtmlTag = "ol"
+	li HtmlTag = "li"
 )
