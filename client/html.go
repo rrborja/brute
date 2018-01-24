@@ -29,53 +29,6 @@ type Html struct {
 	Body Element
 }
 
-type Element struct {
-	Tag
-	Id_ *attribs.Id
-	Class_ []attribs.Class
-	Attributes_ []Attr
-	Content interface{}
-}
-
-type AfterIdElement Element
-
-func (element *Element) Id(value string) *AfterIdElement {
-	id := attribs.Id(value)
-	element.Id_ = &id
-	e := AfterIdElement(*element)
-	return &e
-}
-
-func (element Element) Class(value string) *AfterIdElement {
-	e := AfterIdElement(element)
-	return e.Class(value)
-}
-
-func (element Element) Value(value interface{}) string {
-	e := AfterIdElement(element)
-	return e.Value(value)
-}
-
-func (element *AfterIdElement) Class(value string) *AfterIdElement {
-	class := attribs.Class(value)
-	element.Class_ = append(element.Class_, class)
-	return element
-}
-
-func (element *AfterIdElement) Attributes(attribs ...Attr) *AfterIdElement {
-	element.Attributes_ = attribs
-	return element
-}
-
-type content struct {
-	value interface{}
-	attribs func() (Tag, *attribs.Id, []attribs.Class, []Attr)
-}
-
-func (c content) String() string {
-	return fmt.Sprintf("%s", c.value)
-}
-
 // Union-like C++ Equivalent
 type RenderStack struct {
 	begin string
@@ -86,34 +39,6 @@ type RenderStack struct {
 }
 
 var root = new(RenderStack)
-
-func attribPack(tag Tag, id *attribs.Id, classes []attribs.Class, attrs []Attr) func() (Tag, *attribs.Id, []attribs.Class, []Attr) {
-	return func() (Tag, *attribs.Id, []attribs.Class, []Attr) {
-		return tag, id, classes, attrs
-	}
-}
-
-type ListElement Element
-
-func (element ListElement) Value(items ...interface{}) string {
-	e := AfterIdElement(element)
-	return e.Value(func() {
-		for _, item := range items {
-			element := new(Element)
-			element.Tag = Tag{Name: li}
-			element.Value(item)
-		}
-	})
-}
-
-type RenderElement struct {
-	*AfterIdElement
-}
-
-func (element *AfterIdElement) Value(value interface{}) string {
-	element.Content = value
-	return evaluate(Element(*element))
-}
 
 type TagAttr interface {
 	Name() string
@@ -230,33 +155,10 @@ func addHeadElements(element Element) {
 	headElements = append(headElements, element)
 }
 
-
-func Div() *Element {
-	element := new(Element)
-	element.Tag = Tag{Name: div}
-	return element
-}
-
-func UnorderedList() *ListElement {
-	element := new(ListElement)
-	element.Tag = Tag{Name: ul}
-	return element
-}
-
-func OrderedList() *ListElement {
-	element := new(ListElement)
-	element.Tag = Tag{Name: ol}
-	return element
-}
-
-//func Item() *Element {
-//
-//}
-
 func Escape(content string) string {
+	content = strings.Replace(content, "&", "&amp;", -1)
 	content = strings.Replace(content,"<", "&lt;", -1)
 	content = strings.Replace(content, ">", "&gt;", -1)
-	content = strings.Replace(content, "&", "&amp;", -1)
 	return content
 }
 
@@ -275,10 +177,29 @@ func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []At
 
 	if len(class) > 0 {
 		entry := strings.Join([]string{"class", fmt.Sprintf(`"%s"`, joinClass(class...))}, "=")
-		initial = strings.Join(append([]string{initial}, entry), " ")
+		initial = strings.Join(consolidate(append([]string{initial}, entry)...), " ")
 	}
 
-	return fmt.Sprintf("<%s%s%s>", tag.Name, initial, joinAttrs(attribs...))
+	var selfEnd string
+
+	if tag.SelfEnd {
+		selfEnd = "/"
+	}
+
+	return fmt.Sprintf("<%s>",
+		strings.Join(consolidate(string(tag.Name), initial, joinAttrs(attribs...), selfEnd), " "))
+}
+
+func consolidate(values ...string) []string {
+	finalValue := make([]string, len(values))
+	var counter int
+	for _, value := range values {
+		if len(value) > 0 {
+			finalValue[counter] = value
+			counter ++
+		}
+	}
+	return finalValue[:counter]
 }
 
 func renderEndTag(tag Tag) string {
@@ -312,7 +233,7 @@ func evaluate(element Element) string {
 
 		return result
 	default:
-		result := begin + Escape(fmt.Sprintf("%s", val)) + end
+		result := begin + Escape(fmt.Sprintf("%v", val)) + end
 		root.content = string(append([]byte(root.content), result...))
 
 
@@ -335,8 +256,4 @@ func joinAttrs(attrs ...Attr) string {
 		values[i] = attr.String()
 	}
 	return strings.Join(values[:], " ")
-}
-
-func A(attr ...Attr) []Attr {
-	return attr
 }
