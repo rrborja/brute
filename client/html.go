@@ -29,7 +29,6 @@ type Html struct {
 	Body Element
 }
 
-// Union-like C++ Equivalent
 type RenderStack struct {
 	begin string
 	content string
@@ -212,8 +211,11 @@ func evaluate(element Element) string {
 	classes := element.Class_
 	attribs := element.Attributes_
 
-	begin := renderBeginTag(tag, id, classes, attribs)
-	end := renderEndTag(tag)
+	var begin, end string
+	if tag.Name != selfValue {
+		begin = renderBeginTag(tag, id, classes, attribs)
+		end = renderEndTag(tag)
+	}
 
 	switch val := element.Content.(type) {
 	case func():

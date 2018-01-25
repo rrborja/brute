@@ -9,12 +9,14 @@ type Tag struct {
 type HtmlTag string
 
 var (
+	selfValue HtmlTag = ""
 	body HtmlTag = "body"
 	div HtmlTag = "div"
 	ul HtmlTag = "ul"
 	ol HtmlTag = "ol"
 	li HtmlTag = "li"
 	br HtmlTag = "br"
+	img HtmlTag = "img"
 	header HtmlTag = "header"
 	main HtmlTag = "main"
 	footer HtmlTag = "footer"
@@ -46,6 +48,12 @@ func NewListElement(tag HtmlTag) *ListElement {
 	return element
 }
 
+func Value(value interface{}) string {
+	element := new(Element)
+	element.Tag = Tag{Name: selfValue}
+	return element.Value(value)
+}
+
 func Div() *Element {
 	return NewElement(div)
 }
@@ -60,6 +68,10 @@ func OrderedList() *ListElement {
 
 func Br() string {
 	return NewSelfElement(br, false).Value()
+}
+
+func Image(src string) string {
+	return NewSelfElement(img, false).Value()
 }
 
 func Header() *Element {

@@ -17,6 +17,8 @@ var (
 	ImageIcon = Mime{"image/x-icon"}
 	ImageTiff = Mime{"image/tiff"}
 	AudioMpeg = Mime{"audio/mpeg"}
+	AudioOgg = Mime{"audio/ogg"}
+	AudioWav = Mime{"audio/wav"}
 	VideoMp4 = Mime{"video/mp4"}
 	ArchiveRar = Mime{"application/x-rar-compressed"}
 	ArchiveTar = Mime{"application/x-tar"}
