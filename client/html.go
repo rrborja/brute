@@ -58,7 +58,11 @@ func (attr *Attr) Value() interface{} {
 }
 
 func (attr Attr) String() string {
-	return fmt.Sprintf(`%s="%s"`, attr.Name(), attr.Value())
+	switch v := attr.value.(type) {
+	case bool: if v { return fmt.Sprintf(`%s`, attr.Name()) }
+	default: return fmt.Sprintf(`%s="%s"`, attr.Name(), attr.Value())
+	}
+	return ""
 }
 
 type SelfAttr struct {
@@ -237,8 +241,6 @@ func evaluate(element Element) string {
 	default:
 		result := begin + Escape(fmt.Sprintf("%v", val)) + end
 		root.content = string(append([]byte(root.content), result...))
-
-
 
 		return result
 	}

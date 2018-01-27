@@ -12,43 +12,28 @@ func TestCorrectEvaluatedHtml(t *testing.T) {
 	Div().Value(func() {
 		Div().Value("test s1")
 		Div().Value(func() {
-			Br()
+			Break()
 			UnorderedList().Value(func() {
 				for _, item := range items {
 					Value(item)
 				}
 			})
 		})
-		Br()
+		Break()
 		A("https://brute.io").Value("Click Here")
 		Div().Class("class-1").Class("Green").Value("rat")
 	})
 
-	/*
-	<div>
-	   <div>test s1</div>
-	   <div>
-		  <br>
-		  <ul>
-			 <li>Hello 1</li>
-			 <li>&lt;html&gt;</li>
-			 <li>3</li>
-		  </ul>
-	   </div>
-	   <br><a href="https://brute.io">Click Here</a>
-	   <div class="class-1 Green">rat</div>
-	</div>
-	*/
+	fmt.Println(h)
 
-	//h := Div().Id("navigator").Class("nav-blue").Value(func() {
-	//	Div().Id("navigator2").Class("nav-blue2").Value(func() {
-	//		Div().Id("navigator3").Class("nav-blue3").Value(func() {
-	//
-	//		})
-	//	})
-	//})
+	t.Fail()
+}
 
-	//h := Div().Id("").Value("test")
+func TestFormEvaluatedHtml(t *testing.T) {
+	h := Form().Action("/action_page.php").Get().Value(func() {
+		Value("Username: "); Textfield("username")
+		Value("Password: "); PasswordField("password")
+	}, Submit("submit"))
 
 	fmt.Println(h)
 
