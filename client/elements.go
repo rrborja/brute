@@ -3,34 +3,28 @@ package client
 import (
 	"github.com/rrborja/brute/client/attribs"
 	"fmt"
-	"strings"
 )
 
 type Element struct {
-	Tag
 	Id_ *attribs.Id
 	Class_ []attribs.Class
-	Attributes_ []Attr
+	Attributes_ []TagAttr
 	Content interface{}
+
+	Tag
+	stack *RenderStackHolder
 }
 
 type AfterIdElement Element
 
-func (element *Element) Id(value string) *AfterIdElement {
-	id := attribs.Id(value)
-	element.Id_ = &id
-	e := AfterIdElement(*element)
-	return &e
-}
-
-func (element Element) Class(value string) *AfterIdElement {
-	e := AfterIdElement(element)
-	return e.Class(value)
-}
-
 func (element Element) Value(value interface{}) string {
 	e := AfterIdElement(element)
 	return e.Value(value)
+}
+
+func (element *Element) Class(value string) *AfterIdElement {
+	e := AfterIdElement(*element)
+	return e.Class(value)
 }
 
 func (element *AfterIdElement) Class(value string) *AfterIdElement {
@@ -39,7 +33,7 @@ func (element *AfterIdElement) Class(value string) *AfterIdElement {
 	return element
 }
 
-func (element *AfterIdElement) Attributes(attribs ...Attr) *AfterIdElement {
+func (element *AfterIdElement) Attributes(attribs ...TagAttr) *AfterIdElement {
 	element.Attributes_ = attribs
 	return element
 }
@@ -63,14 +57,14 @@ type RenderElement struct {
 
 func (element *AfterIdElement) Value(value interface{}) string {
 	element.Content = value
-	return evaluate(Element(*element))
+	return element.stack.evaluate(Element(*element))
 }
 
 type SelfElement Element
 
 func (element SelfElement) Value() string {
 	result := renderBeginTag(element.Tag, element.Id_, element.Class_, element.Attributes_)
-	root.content = string(append([]byte(root.content), result...))
+	element.stack.root.content = string(append([]byte(element.stack.root.content), result...))
 	return result
 }
 
@@ -90,8 +84,8 @@ func (element *FormElement) Id(name string) *AfterIdFormElement {
 }
 
 func (element *AfterIdFormElement) Class(name ...string) *AfterClassFormElement {
-	e := AfterClassFormElement(*element).Class(name...)
-	return e
+	e := AfterClassFormElement(*element)
+	return e.Class(name...)
 }
 
 func (element *AfterClassFormElement) Class(name ...string) *AfterClassFormElement {
@@ -109,8 +103,8 @@ func (element *AfterClassFormElement) Action(name string) *AfterActionFormElemen
 }
 
 func (element *FormElement) Action(path string) *AfterActionFormElement {
-	element.Attributes_ = []Attr{
-		{"action", path},
+	element.Attributes_ = []TagAttr{
+		&Attr{"action", path},
 	}
 	castedElement := AfterActionFormElement(*element)
 	return &castedElement
@@ -118,7 +112,7 @@ func (element *FormElement) Action(path string) *AfterActionFormElement {
 
 func (element *AfterActionFormElement) Get() *AfterMethodFormElement {
 	element.Attributes_ = append(element.Attributes_,
-		Attr{"method", "get"},
+		&Attr{"method", "get"},
 	)
 	castedElement := AfterMethodFormElement(*element)
 	return &castedElement
@@ -126,13 +120,13 @@ func (element *AfterActionFormElement) Get() *AfterMethodFormElement {
 
 func (element *AfterActionFormElement) Post() *AfterMethodFormElement {
 	element.Attributes_ = append(element.Attributes_,
-		Attr{"method", "post"},
+		&Attr{"method", "post"},
 	)
 	castedElement := AfterMethodFormElement(*element)
 	return &castedElement
 }
 
-func (element *AfterMethodFormElement) Attributes(attrib ...Attr) *AfterAttributesFormElement {
+func (element *AfterMethodFormElement) Attributes(attrib ...TagAttr) *AfterAttributesFormElement {
 	element.Attributes_ = append(element.Attributes_, attrib...)
 	castedElement := AfterAttributesFormElement(*element)
 	return &castedElement
@@ -146,43 +140,24 @@ func (element *AfterAttributesFormElement) Value(value interface{}, submitElemen
 func (element *AfterMethodFormElement) Value(value interface{}, submitElements ...*SubmitElement) string {
 	e := AfterIdElement(*element)
 	return e.Value(func() {
-		e.Value(value)
+		Value(value)
 		if len(submitElements) == 1 {
 			if element.Id_ != nil && len(*element.Id_) > 0 {
 				buttonId := attribs.Id(fmt.Sprintf("%s-button", *element.Id_))
 				submitElements[0].Id_ = &buttonId
 			}
-			e.Value(submitElements[0])
+			element.stack.evaluate(Element(*submitElements[0]))
 		}
-		if len(submitElements) > 0 {
+		if len(submitElements) > 1 {
 			for i, submitElement := range submitElements {
 				if element.Id_ != nil && len(*element.Id_) > 0 {
 					buttonId := attribs.Id(fmt.Sprintf("%s-button-%d", *element.Id_, i))
 					submitElement.Id_ = &buttonId
 				}
-				e.Value(submitElement)
+				element.stack.evaluate(Element(*submitElement))
 			}
 		}
 	})
 }
 
 type SubmitElement Element
-
-func (element *FinalFormElement) Submit(value string, classes ...string) string {
-	button := NewElement(HtmlTag("button"))
-
-	if element.Id_ != nil && len(*element.Id_) > 0 {
-		buttonId := attribs.Id(fmt.Sprintf("%s-button", *element.Id_))
-		button.Id_ = &buttonId
-	}
-
-	if len(classes) > 0 {
-		button.Attributes_ = append(button.Attributes_, Attr{
-			name: "class",
-			value: strings.Join(classes, " "),
-		})
-	}
-	button.Content = value
-
-	root.content = strings.Join([]string{root.content, evaluate(*button)}, "")
-}

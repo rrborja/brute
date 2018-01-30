@@ -17,6 +17,7 @@ type HtmlTag string
 var (
 	selfValue HtmlTag = ""
 	body HtmlTag = "body"
+	span HtmlTag = "span"
 	div HtmlTag = "div"
 	ul HtmlTag = "ul"
 	ol HtmlTag = "ol"
@@ -56,34 +57,30 @@ var (
 	input HtmlTag = "input"
 )
 
-func NewElement(tag HtmlTag) *Element {
-	element := new(Element)
-	element.Tag = Tag{Name: tag}
-	return element
-}
-
 func NewSelfElement(tag HtmlTag, selfTerminate bool) *SelfElement {
-	element := new(SelfElement)
-	element.Tag = Tag{Name: tag, SelfEnd: selfTerminate}
-	return element
+	element := SelfElement(*NewElement(tag))
+	element.Tag.SelfEnd = selfTerminate
+	return &element
 }
 
 func NewListElement(tag HtmlTag) *ListElement {
-	element := new(ListElement)
-	element.Tag = Tag{Name: tag}
-	return element
+	element := ListElement(*NewElement(tag))
+	return &element
 }
 
 func NewFormElement() *FormElement {
-	element := new(FormElement)
-	element.Tag = Tag{Name: form}
-	return element
+	element := FormElement(*NewElement(form))
+	return &element
 }
 
 func Value(value interface{}) string {
 	element := new(Element)
 	element.Tag = Tag{Name: selfValue}
 	return element.Value(value)
+}
+
+func Span() *Element {
+	return NewElement(span)
 }
 
 func Div() *Element {
@@ -105,8 +102,8 @@ func Break() string {
 func Image(src string, alt ...string) string {
 	element := NewSelfElement(img, false)
 	if len(alt) > 0 {
-		element.Attributes_ = []Attr {
-			{name: "alt", value: strings.Join(alt, "")},
+		element.Attributes_ = []TagAttr {
+			&Attr{name: "alt", value: strings.Join(alt, "")},
 		}
 	}
 	return element.Value()
@@ -161,7 +158,7 @@ func H6() *Element {
 
 func A(href string) *Element {
 	aElement := NewElement(a)
-	aElement.Attributes_ = []Attr{Attr{"href", href}}
+	aElement.Attributes_ = []TagAttr{&Attr{"href", href}}
 	return aElement
 }
 
@@ -216,8 +213,8 @@ func Summary() *Element {
 func Details(open ...bool) *Element {
 	element := NewElement(details)
 	if len(open) > 0 && open[0] {
-		element.Attributes_ = []Attr{
-			{"open", true},
+		element.Attributes_ = []TagAttr{
+			&Attr{"open", true},
 		}
 	}
 	return element
@@ -232,8 +229,8 @@ func Time(datetime *time_.Time, layout ...string) *Element {
 		finalLayout = strings.Join(layout, "")
 	}
 	element := NewElement(time)
-	element.Attributes_ = []Attr{
-		{"datetime", datetime.Format(finalLayout)},
+	element.Attributes_ = []TagAttr{
+		&Attr{"datetime", datetime.Format(finalLayout)},
 	}
 	return element
 }
@@ -244,8 +241,8 @@ func Address() *Element {
 
 func Abbreviation(title string) *Element {
 	element := NewElement(abbr)
-	element.Attributes_ = []Attr{
-		{"title", title},
+	element.Attributes_ = []TagAttr{
+		&Attr{"title", title},
 	}
 	return element
 }
@@ -259,17 +256,18 @@ func Form() *FormElement {
 }
 
 func Submit(value string, classes ...string) *SubmitElement {
-	button := NewElement(HtmlTag("button"))
+	button := *NewElement(HtmlTag("button"))
+	button.Tag = Tag{Name: HtmlTag("button")}
 
 	if len(classes) > 0 {
-		button.Attributes_ = append(button.Attributes_, Attr{
+		button.Attributes_ = append(button.Attributes_, &Attr{
 			name: "class",
 			value: strings.Join(classes, " "),
 		})
 	}
 	button.Content = value
 
-	e := SubmitElement(*button)
+	e := SubmitElement(button)
 	return &e
 }
 
@@ -279,12 +277,12 @@ func Input() *Element {
 
 func inputElement(type_ string, name string, value ...string) string {
 	e := NewSelfElement(input, false)
-	e.Attributes_ = []Attr{
-		{"type", type_},
-		{"name", name},
+	e.Attributes_ = []TagAttr{
+		&Attr{"type", type_},
+		&Attr{"name", name},
 	}
 	if len(value) > 0 {
-		e.Attributes_ = append(e.Attributes_, Attr{
+		e.Attributes_ = append(e.Attributes_, &Attr{
 			"value", strings.Join(value, ""),
 		})
 	}
@@ -316,22 +314,22 @@ func ColorPicker(name string, value string) string {
 // values[2] is value
 func minMaxInputElement(type_ string, name string, values ...string) string {
 	e := NewSelfElement(input, false)
-	e.Attributes_ = []Attr{
-		{"type", type_},
-		{"name", name},
+	e.Attributes_ = []TagAttr{
+		&Attr{"type", type_},
+		&Attr{"name", name},
 	}
 	if len(values) >= 1 && values[0] != "" {
-		e.Attributes_ = append(e.Attributes_, Attr{
+		e.Attributes_ = append(e.Attributes_, &Attr{
 			"min", values[0],
 		})
 	}
 	if len(values) >= 2 && values[1] != "" {
-		e.Attributes_ = append(e.Attributes_, Attr{
+		e.Attributes_ = append(e.Attributes_, &Attr{
 			"max", values[1],
 		})
 	}
 	if len(values) >= 3 && values[2] != "" {
-		e.Attributes_ = append(e.Attributes_, Attr{
+		e.Attributes_ = append(e.Attributes_, &Attr{
 			"value", values[2],
 		})
 	}

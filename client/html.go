@@ -7,14 +7,14 @@ import (
 	"github.com/rrborja/brute/client/html/meta/mime"
 	"fmt"
 	"strings"
+	"github.com/silentred/gid"
+	"html"
+	"io"
 )
 
-var html Html
+var title *string
 
-var title string
-
-var headElements = make([]Element, 0)
-var bodyElements = make([]Element, 0)
+var headElements = make([]interface{}, 0)
 
 var metaInfo *meta.MetaInfo
 var metaCharset *Attr
@@ -24,9 +24,20 @@ var (
 	CharsetAlreadyDefinedError = errors.New("charset already defined")
 )
 
+var htmlStream chan string
+
+var sessionWriter map[int64]*RenderStackHolder
+
 type Html struct {
 	Head Element
 	Body Element
+}
+
+type RenderStackHolder struct {
+	body interface{}
+
+	root *RenderStack
+	writer io.Writer
 }
 
 type RenderStack struct {
@@ -37,11 +48,12 @@ type RenderStack struct {
 	next *RenderStack
 }
 
-var root = new(RenderStack)
+//var root = new(RenderStack)
 
 type TagAttr interface {
 	Name() string
 	Value() interface{}
+	String() string
 }
 
 type Attr struct {
@@ -82,15 +94,7 @@ func (selfAttr SelfAttr) String() string {
 }
 
 func init() {
-	html = Html{}
-}
-
-func PageDescription(author string, description string, keywords ...string) (err error) {
-	if metaInfo != nil {
-		err = MetaInformationAlreadySuppliedError
-	}
-	metaInfo = &meta.MetaInfo{Author:author, Description:description, Keywords:keywords}
-	return
+	sessionWriter = make(map[int64]*RenderStackHolder)
 }
 
 func Charset(charSet CharSet) (err error) {
@@ -102,31 +106,57 @@ func Charset(charSet CharSet) (err error) {
 }
 
 func Title(name string) {
-	title = name
-}
+	if title != nil {
+		return
+	}
 
-func Meta(metaType attribs.Value, content string) {
+	title = &name
 	addHeadElements(Element {
 		Tag: Tag {
+			Name: "title",
+		},
+		Content: name,
+	})
+}
+
+func Author(name string) {
+	Meta("author", name)
+}
+
+func Description(value string) {
+	if len(value) > 160 {
+		value = value[:157] + "..."
+	}
+	Meta("description", value)
+}
+
+func Copyright(value string) {
+	Meta("copyright", value)
+}
+
+func Meta(metaType string, content string) {
+	addHeadElements(SelfElement {
+		Tag: Tag {
 			Name: "meta",
-			Attributes: []TagAttr{
-				&Attr{metaType.String(), content},
-			},
 			SelfEnd: true,
+		},
+		Attributes_: []TagAttr{
+			&Attr{"name", metaType},
+			&Attr{"content",  content},
 		},
 	})
 }
 
 func PreloadStylesheet(href string) {
-	addHeadElements(Element {
+	addHeadElements(Element{
 		Tag: Tag {
 			Name: "link",
-			Attributes: []TagAttr{
-				&Attr{"rel", "stylesheet"},
-				&Attr{"type", mime.TextCss},
-				&Attr{"href", href},
-			},
 			SelfEnd: true,
+		},
+		Attributes_: []TagAttr{
+			&Attr{"rel", "stylesheet"},
+			&Attr{"type", mime.TextCss},
+			&Attr{"href", href},
 		},
 	})
 }
@@ -138,11 +168,12 @@ func PreloadScript(href string, async ...bool) {
 	if len(async) > 0 && async[0] {
 		attr = append(attr, &SelfAttr{"async"})
 	}
-	addHeadElements(Element {
+	addHeadElements(Element{
 		Tag: Tag {
 			Name: "script",
 			Attributes: attr,
 		},
+		Attributes_: attr,
 	})
 }
 
@@ -154,15 +185,12 @@ func EmbedScript(code string, async ...bool) {
 	// TODO
 }
 
-func addHeadElements(element Element) {
+func addHeadElements(element interface{}) {
 	headElements = append(headElements, element)
 }
 
 func Escape(content string) string {
-	content = strings.Replace(content, "&", "&amp;", -1)
-	content = strings.Replace(content,"<", "&lt;", -1)
-	content = strings.Replace(content, ">", "&gt;", -1)
-	return content
+	return strings.Replace(html.EscapeString(content), "\n", " ", -1)
 }
 
 type syntax struct {
@@ -170,7 +198,40 @@ type syntax struct {
 	children []syntax
 }
 
-func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []Attr) string {
+func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
+	id := gid.Get()
+
+	if renderStackHolder, ok = sessionWriter[id]; !ok {
+		writer := writerSessions[id]
+		renderStackHolder = &RenderStackHolder{root: new(RenderStack), writer: writer}
+
+		sessionWriter[id] = renderStackHolder
+
+		writer.Write([]byte("<head>"))
+		for _, headElement := range headElements {
+			switch v := headElement.(type) {
+			case Element: renderStackHolder.evaluate(v)
+			case SelfElement: renderStackHolder.evaluate(Element(v))
+			}
+		}
+		writer.Write([]byte("</head><body>"))
+	}
+
+	return
+}
+
+func NewElement(tag HtmlTag) *Element {
+
+	renderStackHolder, _ := checkNewBody()
+
+	element := new(Element)
+	element.Tag = Tag{Name: tag}
+	element.stack = renderStackHolder
+
+	return element
+}
+
+func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []TagAttr) string {
 	var initial string
 
 	if id != nil {
@@ -209,7 +270,7 @@ func renderEndTag(tag Tag) string {
 	return "</" + string(tag.Name) + ">"
 }
 
-func evaluate(element Element) string {
+func (stack *RenderStackHolder) evaluate(element Element) string {
 	tag := element.Tag
 	id := element.Id_
 	classes := element.Class_
@@ -218,29 +279,39 @@ func evaluate(element Element) string {
 	var begin, end string
 	if tag.Name != selfValue {
 		begin = renderBeginTag(tag, id, classes, attribs)
+		if tag.SelfEnd {
+			stack.writer.Write([]byte(begin))
+			return begin
+		}
 		end = renderEndTag(tag)
 	}
 
 	switch val := element.Content.(type) {
 	case func():
-		root.begin = begin
-		root.next = new(RenderStack)
+		stack.root.begin = begin
+		stack.root.next = new(RenderStack)
 
-		prev := root
-		root = root.next
+		prev := stack.root
+		stack.root = stack.root.next
+
+		stack.writer.Write([]byte(begin))
 
 		val()
 
-		result := begin + root.content + end
+		stack.writer.Write([]byte(end))
 
-		root = prev
-		root.end = begin
-		root.content =  string(append([]byte(root.content), result...))
+		result := begin + stack.root.content + end
+
+		stack.root = prev
+		stack.root.end = begin
+		stack.root.content =  string(append([]byte(stack.root.content), result...))
 
 		return result
 	default:
 		result := begin + Escape(fmt.Sprintf("%v", val)) + end
-		root.content = string(append([]byte(root.content), result...))
+		stack.root.content = string(append([]byte(stack.root.content), result...))
+
+		stack.writer.Write([]byte(result))
 
 		return result
 	}
@@ -254,7 +325,7 @@ func joinClass(classes ...attribs.Class) string {
 	return strings.Join(values[:], " ")
 }
 
-func joinAttrs(attrs ...Attr) string {
+func joinAttrs(attrs ...TagAttr) string {
 	values := make([]string, len(attrs))
 	for i, attr := range attrs {
 		values[i] = attr.String()

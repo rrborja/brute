@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 	"runtime"
+	"io"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -20,8 +21,17 @@ var customOut = os.Stdout
 var client *rpc.Client
 
 var handlerSessions HandlerSessions
+var writerSessions WriterSessions
 
-type HandlerSessions map[int64]*Context
+type HandlerSessions map[int64]Handler
+type WriterSessions map[int64]io.Writer
+
+type Handler interface {
+	Lock()
+	Unlock()
+	Write([]byte) (int, error)
+	Call(string, *brute.EchoPacket, *bool) error
+}
 
 type Context struct {
 	Name string
@@ -31,11 +41,31 @@ type Context struct {
 	*sync.Mutex
 }
 
+func (context *Context) Write(buf []byte) (n int, err error) {
+	var ack bool
+	err = context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, buf, 200}, &ack)
+	n = len(buf)
+	return
+}
+
+func (context *Context) Lock() {
+	context.Mutex.Lock()
+}
+
+func (context *Context) Unlock() {
+	context.Mutex.Unlock()
+}
+
+func (context *Context) Call(functionName string, packet *brute.EchoPacket, ack *bool) error {
+	return context.Rpc(functionName, packet, ack)
+}
+
 func init() {
 	//os.Stdin = nil
 	//os.Stdout = nil
 
 	handlerSessions = make(HandlerSessions)
+	writerSessions = make(WriterSessions)
 }
 
 func Out(data []byte, args ...interface{}) {
@@ -49,9 +79,7 @@ func Out(data []byte, args ...interface{}) {
 		data = []byte(fmt.Sprintf(string(data), args))
 	}
 
-	var ack bool
-	context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, data, 200}, &ack)
-
+	context.Write(data)
 }
 
 func Echo(message string, args ...interface{}) {
@@ -75,6 +103,8 @@ func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 				}
 			}(callEvent)
 			handlerSessions[gid.Get()] = &callEvent
+			// Blue stuff and plug in stuff and refill bug spray
+			writerSessions[gid.Get()] = &callEvent
 			handler(callEvent.Arguments)
 		}(handlerSessions, handler, callEvent)
 	}
@@ -87,7 +117,7 @@ func SystemMessage(message string) {
 	defer context.Unlock()
 
 	var ack bool
-	context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, []byte(message), 700}, &ack)
+	context.Call("RequestSession.Write", &brute.EchoPacket{context.(*Context).SessionId, []byte(message), 700}, &ack)
 }
 
 func Run(handler func(args map[string]string)) {
