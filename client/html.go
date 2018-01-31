@@ -10,14 +10,15 @@ import (
 	"github.com/silentred/gid"
 	"html"
 	"io"
+	"sync"
 )
 
-var title *string
-
-var headElements = make([]interface{}, 0)
-
-var metaInfo *meta.MetaInfo
-var metaCharset *Attr
+//var title *string
+//
+//var headElements = make([]interface{}, 0)
+//
+//var metaInfo *meta.MetaInfo
+//var metaCharset *Attr
 
 var (
 	MetaInformationAlreadySuppliedError = errors.New("basic meta information already supplied")
@@ -27,6 +28,7 @@ var (
 var htmlStream chan string
 
 var sessionWriter map[int64]*RenderStackHolder
+var sessionWriterMutex = sync.RWMutex{}
 
 type Html struct {
 	Head Element
@@ -34,6 +36,13 @@ type Html struct {
 }
 
 type RenderStackHolder struct {
+	title *string
+
+	headElements []interface{}
+
+	metaInfo *meta.MetaInfo
+	metaCharset *Attr
+
 	body interface{}
 
 	root *RenderStack
@@ -98,25 +107,45 @@ func init() {
 }
 
 func Charset(charSet CharSet) (err error) {
-	if metaCharset != nil {
+	sessionId := gid.Get()
+	renderStackHolder, ok := Writer(sessionId)
+
+	if !ok {
+		return fmt.Errorf("cannot set page's charset since the session %v expired or does not exist", sessionId)
+	}
+
+	metaCharset := &renderStackHolder.metaCharset
+
+	if *metaCharset != nil {
 		err = CharsetAlreadyDefinedError
 	}
-	metaCharset = &Attr{name: "charset", value: charSet}
+	*metaCharset = &Attr{name: "charset", value: charSet}
 	return
 }
 
-func Title(name string) {
-	if title != nil {
+func Title(name string) (err error) {
+	sessionId := gid.Get()
+	renderStackHolder, ok := Writer(sessionId)
+
+	if !ok {
+		return fmt.Errorf("cannot set page's title since the session %v expired or does not exist", sessionId)
+	}
+
+	title := &renderStackHolder.title
+
+	if *title != nil {
 		return
 	}
 
-	title = &name
+	*title = &name
 	addHeadElements(Element {
 		Tag: Tag {
 			Name: "title",
 		},
 		Content: name,
 	})
+
+	return
 }
 
 func Author(name string) {
@@ -185,8 +214,19 @@ func EmbedScript(code string, async ...bool) {
 	// TODO
 }
 
-func addHeadElements(element interface{}) {
-	headElements = append(headElements, element)
+func addHeadElements(element interface{}) (err error) {
+	sessionId := gid.Get()
+	renderStackHolder, ok := Writer(sessionId)
+
+	if !ok {
+		return fmt.Errorf("cannot set page's head content since the session %v expired or does not exist", sessionId)
+	}
+
+	headElements := &renderStackHolder.headElements
+
+	*headElements = append(*headElements, element)
+
+	return
 }
 
 func Escape(content string) string {
@@ -198,17 +238,35 @@ type syntax struct {
 	children []syntax
 }
 
+func Writer(sessionId int64) (renderStackHolder *RenderStackHolder, ok bool) {
+	sessionWriterMutex.RLock()
+	renderStackHolder, ok = sessionWriter[sessionId]
+	sessionWriterMutex.RUnlock()
+	return
+}
+
+func SetWriter(sessionId int64, renderStackHolder *RenderStackHolder) {
+	sessionWriterMutex.Lock()
+	sessionWriter[sessionId] = renderStackHolder
+	sessionWriterMutex.Unlock()
+}
+
 func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
 	id := gid.Get()
 
-	if renderStackHolder, ok = sessionWriter[id]; !ok {
-		writer := writerSessions[id]
-		renderStackHolder = &RenderStackHolder{root: new(RenderStack), writer: writer}
+	renderStackHolder, ok = Writer(id)
+	if !ok {
+		panic("Expected a writer. Endpoint crashed.")
+	}
 
-		sessionWriter[id] = renderStackHolder
+	if renderStackHolder.body == nil {
+		defer func() { renderStackHolder.body = new(interface{}) }()
+
+		writer := renderStackHolder.writer
 
 		writer.Write([]byte("<head>"))
-		for _, headElement := range headElements {
+		for _, _headElement := range renderStackHolder.headElements {
+			headElement := _headElement
 			switch v := headElement.(type) {
 			case Element: renderStackHolder.evaluate(v)
 			case SelfElement: renderStackHolder.evaluate(Element(v))

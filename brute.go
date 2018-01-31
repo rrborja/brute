@@ -40,6 +40,7 @@ import (
 	"github.com/elazarl/go-bindata-assetfs"
 	"github.com/rrborja/brute/assets"
 	"html/template"
+	"strings"
 )
 
 var cwd = ""
@@ -89,7 +90,10 @@ type ControllerEndpoint struct {
 	runtimeFile string
 }
 
-type RequestSession map[[32]byte]*ContextHolder
+type RequestSession struct {
+	store map[[32]byte]*ContextHolder
+	sync.RWMutex
+}
 type ContextHolder struct {
 	RpcArguments map[string]string
 	Stream       chan *EchoPacket
@@ -116,20 +120,34 @@ func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	}{projectName, r.URL.Path, "MyEndpoint"})
 }
 
-func (session RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
-	*ack = session[id].RpcArguments
+func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
+	sessions.RLock()
+	defer sessions.RUnlock()
+
+	session := sessions.store[id]
+	*ack = session.RpcArguments
 	return nil
 }
 
-func (session RequestSession) Write(packet *EchoPacket, ack *bool) error {
-	session[packet.SessionId].Stream <- packet
+func (sessions *RequestSession) Write(packet *EchoPacket, ack *bool) error {
+	sessions.RLock()
+	defer sessions.RUnlock()
+
+	session := sessions.store[packet.SessionId]
+	session.Stream <- packet
+
 	*ack = true
 	return nil
 }
 
-func (session RequestSession) Close(packet *EchoPacket, ack *bool) error {
-	close(session[packet.SessionId].Stream)
-	session[packet.SessionId].End <- true
+func (sessions *RequestSession) Close(packet *EchoPacket, ack *bool) error {
+	sessions.RLock()
+	defer sessions.RUnlock()
+
+	session := sessions.store[packet.SessionId]
+	close(session.Stream)
+	session.End <- true
+
 	*ack = true
 	return nil
 }
@@ -154,7 +172,7 @@ func init() {
 		log.Fatal(err)
 	}
 	cwd = _cwd
-	requestSession = make(RequestSession)
+	requestSession.store = make(map[[32]byte]*ContextHolder)
 
 	loadTemplates()
 }
@@ -189,7 +207,7 @@ func New(config *Config) {
 		log.Fatal(err)
 	}
 
-	rpc.Register(requestSession)
+	rpc.Register(&requestSession)
 	go rpc.Accept(inbound)
 }
 
@@ -203,16 +221,16 @@ func SetProjectName(name string) {
 }
 
 func CleanUp() {
-	os.Remove("endpoints")
+	os.Remove("bin")
 }
 
 func rebuildRootEndpoint(route Route) string {
 	var out, routeDirectory string
 	if len(route.Path) > 0 {
-		out = filepath.Join(cwd, "endpoints", route.Directory)
+		out = filepath.Join(cwd, "bin", "endpoints", route.Directory)
 		routeDirectory = filepath.Join(cwd, "src", route.Directory)
 	} else {
-		out = filepath.Join(cwd, "endpoints", "root")
+		out = filepath.Join(cwd, "bin", "endpoints", "root")
 		routeDirectory = filepath.Join(cwd, "src")
 	}
 
@@ -276,7 +294,7 @@ func HostRootEndpoint() {
 	buildEndpoint(root)
 	StartRootEndpoint(root)
 
-	source := filepath.Join(cwd, "endpoints", "root")
+	source := filepath.Join(cwd, "bin", "endpoints", "root")
 	endpoint := &ControllerEndpoint{projectName, root, source}
 
 	r.Handle("/", endpoint).Name("root")
@@ -284,10 +302,15 @@ func HostRootEndpoint() {
 
 func Deploy(config *Config) {
 	CleanUp()
-	os.Mkdir("endpoints", 0700)
+	os.Mkdir("bin/endpoints", 0700)
+	os.Mkdir("bin/hosted", 0700)
+	os.Mkdir("bin/hosted/static", 0700)
+	os.Mkdir("bin/hosted/assets", 0700)
+	os.Mkdir("bin/temp", 0700)
+	os.Mkdir("bin/temp/db", 0700)
 
 	for _, route := range config.Routes {
-		build := filepath.Join(cwd, "endpoints", route.Directory)
+		build := filepath.Join(cwd, "bin", "endpoints", route.Directory)
 
 		endpoint := &ControllerEndpoint{config.Name, route, build}
 		r.Handle(route.Path, endpoint).Name(route.Directory)
@@ -298,12 +321,11 @@ func Deploy(config *Config) {
 
 	HostRootEndpoint()
 
-	srv := &http.Server{Addr: ":80", Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
+	srv := &http.Server{Addr: ":8080", Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
 		target := "https://" + req.Host + req.URL.Path
 		if len(req.URL.RawQuery) > 0 {
 			target += "?" + req.URL.RawQuery
 		}
-		fmt.Println(target)
 		w.Header().Set("server", "brute.io")
 		w.Header().Add("X-comment", "You must use HTTPS next time.")
 		http.Redirect(w, req, target,
@@ -314,7 +336,9 @@ func Deploy(config *Config) {
 
 	go srv.ListenAndServe()
 
-	http.ListenAndServeTLS(":443", "cert.pem", "tls.key", r)
+	secureSrv := &http.Server{Addr: ":8443", Handler: r}
+	secureSrv.SetKeepAlivesEnabled(true)
+	secureSrv.ListenAndServeTLS("cert.pem", "tls.key")
 }
 
 func AddEndpoint(route *Route) {
@@ -355,11 +379,21 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 	context := &ContextHolder{Stream: make(chan *EchoPacket, 100), End: make(chan bool, 1)}
 	defer close(context.End)
 
-	requestSession[sid] = context
+	requestSession.Lock()
+	requestSession.store[sid] = context
+	requestSession.Unlock()
 
 	context.Route = controller.Route
 
 	pathArgs := mux.Vars(r)
+	for k, v := range r.URL.Query() {
+		if existing, ok := pathArgs[k]; ok {
+			log.Printf("Path through key %s already exists. [existing: %v, this: %v]", k, existing, v)
+		} else {
+			pathArgs[k] = strings.Join(v, "~")
+		}
+	}
+
 	context.RpcArguments = pathArgs
 
 	if endpoint, ok := endpoints.Load(controller.Route.Directory); ok {
@@ -383,10 +417,10 @@ func StartRootEndpoint(route Route) {
 	var out string
 	var env string
 	if len(route.Path) > 0 {
-		out = filepath.Join(cwd, "endpoints", route.Directory)
+		out = filepath.Join(cwd, "bin", "endpoints", route.Directory)
 		env = fmt.Sprintf("ROUTE=%s", route.Directory)
 	} else {
-		out = filepath.Join(cwd, "endpoints", "root")
+		out = filepath.Join(cwd, "bin", "endpoints", "root")
 		env = fmt.Sprintf("ROUTE=%s", "root")
 	}
 

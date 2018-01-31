@@ -10,7 +10,6 @@ import (
 	"os"
 	"sync"
 	"runtime"
-	"io"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -19,12 +18,6 @@ var customIn = os.Stdin
 var customOut = os.Stdout
 
 var client *rpc.Client
-
-var handlerSessions HandlerSessions
-var writerSessions WriterSessions
-
-type HandlerSessions map[int64]Handler
-type WriterSessions map[int64]io.Writer
 
 type Handler interface {
 	Lock()
@@ -60,13 +53,7 @@ func (context *Context) Call(functionName string, packet *brute.EchoPacket, ack 
 	return context.Rpc(functionName, packet, ack)
 }
 
-func init() {
-	//os.Stdin = nil
-	//os.Stdout = nil
 
-	handlerSessions = make(HandlerSessions)
-	writerSessions = make(WriterSessions)
-}
 
 func Out(data []byte, args ...interface{}) {
 	// use runtime.Caller to restrict calling this method only the endpoint's handler source code
@@ -102,9 +89,16 @@ func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 					fmt.Fprintf(os.Stderr, "Endpoint %s encountered an error: %v\n%s", callEvent.Name, r, buf)
 				}
 			}(callEvent)
-			handlerSessions[gid.Get()] = &callEvent
-			// Blue stuff and plug in stuff and refill bug spray
-			writerSessions[gid.Get()] = &callEvent
+
+			sessionId := gid.Get()
+			writer := &callEvent
+
+			handlerSessions.Set(sessionId, writer)
+			writerSessions.Set(sessionId, writer)
+
+			SetWriter(sessionId, &RenderStackHolder{root: new(RenderStack), writer: writer})
+
+			// Start processing the endpoint while listening for writes to pass packets to the connected Client
 			handler(callEvent.Arguments)
 		}(handlerSessions, handler, callEvent)
 	}

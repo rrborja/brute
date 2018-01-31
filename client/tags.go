@@ -74,8 +74,7 @@ func NewFormElement() *FormElement {
 }
 
 func Value(value interface{}) string {
-	element := new(Element)
-	element.Tag = Tag{Name: selfValue}
+	element := NewElement(selfValue)
 	return element.Value(value)
 }
 
