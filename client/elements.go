@@ -65,6 +65,7 @@ type SelfElement Element
 func (element SelfElement) Value() string {
 	result := renderBeginTag(element.Tag, element.Id_, element.Class_, element.Attributes_)
 	element.stack.root.content = string(append([]byte(element.stack.root.content), result...))
+	element.stack.evaluate(Element(element))
 	return result
 }
 

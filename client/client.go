@@ -53,11 +53,9 @@ func (context *Context) Call(functionName string, packet *brute.EchoPacket, ack 
 	return context.Rpc(functionName, packet, ack)
 }
 
-
-
 func Out(data []byte, args ...interface{}) {
 	// use runtime.Caller to restrict calling this method only the endpoint's handler source code
-	context := handlerSessions[gid.Get()]
+	context, _ := handlerSessions.Get(gid.Get())
 
 	context.Lock()
 	defer context.Unlock()
@@ -76,7 +74,16 @@ func Echo(message string, args ...interface{}) {
 func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 	for callEvent := range callEvents {
 		go func(handlerSessions HandlerSessions, handler func(args map[string]string), callEvent Context) {
+			sessionId := gid.Get()
+
 			defer func(callEvent Context) {
+				renderStackHolder, ok := Writer(sessionId)
+				if ok {
+					if len(renderStackHolder.headElements) > 0 || renderStackHolder.body != nil {
+						renderStackHolder.writer.Write([]byte("</body></html>"))
+					}
+				}
+
 				var ack bool
 				if err := callEvent.Rpc("RequestSession.Close",
 					&brute.EchoPacket{SessionId: callEvent.SessionId},
@@ -90,7 +97,6 @@ func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 				}
 			}(callEvent)
 
-			sessionId := gid.Get()
 			writer := &callEvent
 
 			handlerSessions.Set(sessionId, writer)
@@ -114,7 +120,11 @@ func SystemMessage(message string) {
 	context.Call("RequestSession.Write", &brute.EchoPacket{context.(*Context).SessionId, []byte(message), 700}, &ack)
 }
 
-func Run(handler func(args map[string]string)) {
+func With(handlers ...func(args map[string]string)) []func(args map[string]string){
+	return handlers
+}
+
+func Run(handler func(args map[string]string), handlers ...func(args map[string]string)) {
 
 	conn, err := net.Dial("tcp", "localhost:11000")
 	if err != nil {

@@ -276,6 +276,7 @@ func Input() *Element {
 
 func inputElement(type_ string, name string, value ...string) string {
 	e := NewSelfElement(input, false)
+	e.SelfEnd = true
 	e.Attributes_ = []TagAttr{
 		&Attr{"type", type_},
 		&Attr{"name", name},

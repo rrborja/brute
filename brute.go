@@ -41,6 +41,7 @@ import (
 	"github.com/rrborja/brute/assets"
 	"html/template"
 	"strings"
+	"github.com/rrborja/brute/client/html/meta/mime"
 )
 
 var cwd = ""
@@ -315,6 +316,16 @@ func Deploy(config *Config) {
 		endpoint := &ControllerEndpoint{config.Name, route, build}
 		r.Handle(route.Path, endpoint).Name(route.Directory)
 	}
+
+	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Server", "brute.io")
+		w.Header().Set("Content-Type", string(mime.ImageIcon))
+		w.Header().Set("ETag", `"1"`)
+		favicon, _ := assets.Asset("static/default-pages/favicon.ico")
+		w.Write(favicon)
+		w.WriteHeader(200)
+	})
 
 	r.NotFoundHandler = http.HandlerFunc(defaultNotFoundHandler)
 	HostStaticFiles()

@@ -264,7 +264,7 @@ func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
 
 		writer := renderStackHolder.writer
 
-		writer.Write([]byte("<head>"))
+		writer.Write([]byte("<!DOCTYPE html><html><head>"))
 		for _, _headElement := range renderStackHolder.headElements {
 			headElement := _headElement
 			switch v := headElement.(type) {
