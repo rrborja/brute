@@ -10,6 +10,9 @@ import (
 	"os"
 	"sync"
 	"runtime"
+	"reflect"
+	"net/http"
+	"net/url"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -19,6 +22,8 @@ var customOut = os.Stdout
 
 var client *rpc.Client
 
+type Message url.Values
+
 type Handler interface {
 	Lock()
 	Unlock()
@@ -27,10 +32,13 @@ type Handler interface {
 }
 
 type Context struct {
-	Name string
-	SessionId [32]byte
-	Arguments map[string]string
-	Rpc       func(string, interface{}, interface{}) error
+	Name 		string
+	SessionId 	[32]byte
+	Method 		string
+	Message
+	Arguments 	map[string]string
+	Rpc       	func(string, interface{}, interface{}) error
+
 	*sync.Mutex
 }
 
@@ -71,9 +79,9 @@ func Echo(message string, args ...interface{}) {
 	Out([]byte(message), args...)
 }
 
-func Handle(handler func(args map[string]string), callEvents <- chan Context) {
+func Handle(handler map[string]interface{}, callEvents <- chan Context) {
 	for callEvent := range callEvents {
-		go func(handlerSessions HandlerSessions, handler func(args map[string]string), callEvent Context) {
+		go func(handlerSessions HandlerSessions, handlers map[string]interface{}, callEvent Context) {
 			sessionId := gid.Get()
 
 			defer func(callEvent Context) {
@@ -105,7 +113,55 @@ func Handle(handler func(args map[string]string), callEvents <- chan Context) {
 			SetWriter(sessionId, &RenderStackHolder{root: new(RenderStack), writer: writer})
 
 			// Start processing the endpoint while listening for writes to pass packets to the connected Client
-			handler(callEvent.Arguments)
+			if handler, ok := handlers[callEvent.Method]; ok {
+				funcValue := reflect.ValueOf(handler)
+				funcType := funcValue.Type()
+
+				if funcType.Kind() != reflect.Func {
+					panic(fmt.Errorf("did I just tell you not to modify the main() for this endpoint %s? %v\n", callEvent.Name, handler))
+				}
+
+				switch callEvent.Method {
+				case http.MethodGet, http.MethodDelete:
+					if funcType.NumIn() == 0 {
+						handler.(func())()
+					} else if funcType.NumIn() == 1 && funcType.In(0).AssignableTo(reflect.TypeOf(map[string]string{})) {
+						handler.(func(map[string]string))(callEvent.Arguments)
+					} else {
+						panic(fmt.Errorf("invalid function signature for this endpoint %s: %v\n", callEvent.Name, handler))
+					}
+				case http.MethodPost, http.MethodPut, http.MethodPatch:
+					if funcType.NumIn() == 0 {
+						handler.(func())()
+					} else if funcType.NumIn() == 1 {
+						argType := funcType.In(0)
+						if argType.AssignableTo(reflect.TypeOf(Message{})) {
+							handler.(func(Message))(callEvent.Message)
+						} else if argType.AssignableTo(reflect.TypeOf(map[string]string{})) {
+							handler.(func(map[string]string))(callEvent.Arguments)
+						} else {
+							panic(fmt.Errorf("invalid function signature for this endpoint %s: %v\n", callEvent.Name, handler))
+						}
+					} else if funcType.NumIn() == 2 {
+						argType1st := funcType.In(0)
+						argType2nd := funcType.In(1)
+						if argType1st.AssignableTo(reflect.TypeOf(Message{})) && argType2nd.AssignableTo(reflect.TypeOf(map[string]string{})) {
+							handler.(func(Message, map[string]string))(callEvent.Message, callEvent.Arguments)
+						} else if argType2nd.AssignableTo(reflect.TypeOf(Message{})) && argType1st.AssignableTo(reflect.TypeOf(map[string]string{})) {
+							handler.(func(map[string]string, Message))(callEvent.Arguments, callEvent.Message)
+						} else {
+							panic(fmt.Errorf("invalid function signature for this endpoint %s: %v\n", callEvent.Name, handler))
+						}
+					} else {
+						panic(fmt.Errorf("invalid function signature for this endpoint %s: %v\n", callEvent.Name, handler))
+					}
+				default:
+					log.Printf("unsupported method %s for this endpoint %s\n", callEvent.Method, callEvent.Name)
+				}
+			} else {
+				log.Printf("Method %v is incompatible. Running a Get method for endpoint %s instead\n", callEvent.Method, callEvent.Name)
+				handlers[http.MethodGet].(func(map[string]string))(callEvent.Arguments)
+			}
 		}(handlerSessions, handler, callEvent)
 	}
 }
@@ -120,11 +176,11 @@ func SystemMessage(message string) {
 	context.Call("RequestSession.Write", &brute.EchoPacket{context.(*Context).SessionId, []byte(message), 700}, &ack)
 }
 
-func With(handlers ...func(args map[string]string)) []func(args map[string]string){
+func With(handlers ...interface{}) []interface{} {
 	return handlers
 }
 
-func Run(handler func(args map[string]string), handlers ...func(args map[string]string)) {
+func Run(handler func(args map[string]string), handlers ...interface{}) {
 
 	conn, err := net.Dial("tcp", "localhost:11000")
 	if err != nil {
@@ -145,9 +201,27 @@ func Run(handler func(args map[string]string), handlers ...func(args map[string]
 		log.Fatal(err)
 	}
 
+	nonGetHandlers := map[string]interface{}{http.MethodGet : handler}
+	for _, nonGetHandler := range handlers {
+		handler := nonGetHandler
+		standardHandlerName := runtime.FuncForPC(reflect.ValueOf(handler).Pointer()).Name()
+		switch standardHandlerName {
+		case "main.Create", "main.create":
+			nonGetHandlers[http.MethodPost] = handler
+		case "main.Update", "main.update":
+			nonGetHandlers[http.MethodPut] = handler
+		case "main.PartialUpdate", "main.partialUpdate":
+			nonGetHandlers[http.MethodPatch] = handler
+		case "main.Delete", "main.delete":
+			nonGetHandlers[http.MethodDelete] = handler
+		default:
+			log.Print("Didn't I tell you not to modify the main() function of your endpoint code?")
+		}
+	}
+
 	callEvent := make(chan Context, 100)
 
-	go Handle(handler, callEvent)
+	go Handle(nonGetHandlers, callEvent)
 
 	ack := make([]byte, 32)
 	for {
@@ -158,14 +232,16 @@ func Run(handler func(args map[string]string), handlers ...func(args map[string]
 		var sid [32]byte
 		copy(sid[:], ack)
 
-		var arguments map[string]string
-		if err := client.Call("RequestSession.AcceptRpc", sid, &arguments); err == nil {
+		var rpcResponse struct{Method string; Message url.Values; Arguments map[string]string}
+		if err := client.Call("RequestSession.AcceptRpc", sid, &rpcResponse); err == nil {
 			callEvent <- Context{
-				Name: source,
-				SessionId: sid,
-				Arguments: arguments,
-				Rpc:       client.Call,
-				Mutex:     new(sync.Mutex),
+				Name: 		source,
+				SessionId: 	sid,
+				Method: 	rpcResponse.Method,
+				Message: 	Message(rpcResponse.Message),
+				Arguments: 	rpcResponse.Arguments,
+				Rpc:       	client.Call,
+				Mutex:     	new(sync.Mutex),
 			}
 		} else {
 			panic(err)

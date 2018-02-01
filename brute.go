@@ -42,6 +42,7 @@ import (
 	"html/template"
 	"strings"
 	"github.com/rrborja/brute/client/html/meta/mime"
+	"net/url"
 )
 
 var cwd = ""
@@ -99,6 +100,8 @@ type ContextHolder struct {
 	RpcArguments map[string]string
 	Stream       chan *EchoPacket
 	End          chan bool
+	Message		 url.Values
+	Method		 string
 	Route
 }
 
@@ -121,12 +124,14 @@ func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
 	}{projectName, r.URL.Path, "MyEndpoint"})
 }
 
-func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *map[string]string) error {
+func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *struct{Method string; Message url.Values; Arguments map[string]string}) error {
 	sessions.RLock()
 	defer sessions.RUnlock()
 
 	session := sessions.store[id]
-	*ack = session.RpcArguments
+	ack.Method = session.Method
+	ack.Message = session.Message
+	ack.Arguments = session.RpcArguments
 	return nil
 }
 
@@ -405,7 +410,11 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 		}
 	}
 
+	context.Method = r.Method
 	context.RpcArguments = pathArgs
+
+	r.ParseForm()
+	context.Message = r.Form
 
 	if endpoint, ok := endpoints.Load(controller.Route.Directory); ok {
 		endpoint.(*ConnWriter).Write(sid[:])
