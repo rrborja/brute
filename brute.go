@@ -230,13 +230,16 @@ func CleanUp() {
 	os.Remove("bin")
 }
 
-func rebuildRootEndpoint(route Route) string {
+func rebuildRootEndpoint(route Route) (string, error) {
+	tmpBuilds := filepath.Join("bin", "build")
+	endpointBuilds := filepath.Join("bin", "endpoints")
+
 	var out, routeDirectory string
 	if len(route.Path) > 0 {
-		out = filepath.Join(cwd, "bin", "endpoints", route.Directory)
+		out = filepath.Join(cwd, tmpBuilds, route.Directory)
 		routeDirectory = filepath.Join(cwd, "src", route.Directory)
 	} else {
-		out = filepath.Join(cwd, "bin", "endpoints", "root")
+		out = filepath.Join(cwd, tmpBuilds, "root")
 		routeDirectory = filepath.Join(cwd, "src")
 	}
 
@@ -259,18 +262,26 @@ func rebuildRootEndpoint(route Route) string {
 	}
 
 	if err := cmd.Wait(); err != nil {
-		panic(err)
+		return "", err
+	} else {
+		err := os.Rename(out, filepath.Join(cwd, endpointBuilds, route.Directory))
+		if err != nil {
+			panic(err)
+		}
+		return routeDirectory, nil
 	}
 
-	return routeDirectory
 }
 
-func rebuildEndpoint(route Route) string {
+func rebuildEndpoint(route Route) (string, error) {
 	return rebuildRootEndpoint(route)
 }
 
 func buildEndpoint(route Route) {
-	sourceEndpointDirectory := rebuildEndpoint(route)
+	sourceEndpointDirectory, err := rebuildEndpoint(route)
+	if err != nil {
+		panic(err)
+	}
 
 	c := make(chan notify.EventInfo, 1)
 	if err := notify.Watch(sourceEndpointDirectory, c, notify.All); err != nil {
@@ -280,14 +291,19 @@ func buildEndpoint(route Route) {
 		for range c {
 			fmt.Printf("Attempting to restart %s due to code changes...\n", route.Directory)
 			if endpoint, ok := endpoints.Load(route.Directory); ok {
-				err := endpoint.(*ConnWriter).Close()
+				_, err := rebuildEndpoint(route)
+				if err == nil {
+					endpoints.Delete(route.Directory)
+					StartEndpoint(route)
+				} else {
+					log.Println(err)
+				}
+
+				err = endpoint.(*ConnWriter).Close()
 				if err != nil {
 					fmt.Println(err)
 					debug.PrintStack()
-				} else {
-					endpoints.Delete(route.Directory)
-					rebuildEndpoint(route)
-					StartEndpoint(route)
+					// TODO: Fix by implementing a feature that will auto restart the endpoint's RPC connection
 				}
 			}
 		}
@@ -314,6 +330,7 @@ func Deploy(config *Config) {
 	os.Mkdir("bin/hosted/assets", 0700)
 	os.Mkdir("bin/temp", 0700)
 	os.Mkdir("bin/temp/db", 0700)
+	os.Mkdir("bin/build", 0700)
 
 	for _, route := range config.Routes {
 		build := filepath.Join(cwd, "bin", "endpoints", route.Directory)

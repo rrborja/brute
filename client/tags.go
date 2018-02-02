@@ -95,7 +95,7 @@ func OrderedList() *ListElement {
 }
 
 func Break() string {
-	return NewSelfElement(br, false).Value()
+	return NewSelfElement(br, true).Value()
 }
 
 func Image(src string, alt ...string) string {

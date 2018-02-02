@@ -70,6 +70,10 @@ type Attr struct {
 	value interface{}
 }
 
+func NewAttr(name string, value interface{}) *Attr {
+	return &Attr{name, value}
+}
+
 func (attr *Attr) Name() string {
 	return attr.name
 }
