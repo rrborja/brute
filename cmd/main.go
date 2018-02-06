@@ -20,7 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/manifoldco/promptui"
+	//"github.com/manifoldco/promptui"
 	"github.com/rrborja/brute"
 	"github.com/rrborja/brute/cmd/templates"
 	"gopkg.in/yaml.v2"
@@ -31,6 +31,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"github.com/manifoldco/promptui"
+	. "github.com/rrborja/brute/cmd/ui"
 )
 
 const (
@@ -54,7 +56,10 @@ func main() {
 		}
 	}
 
-	fmt.Println("Checking contents...")
+	go RunTerminal()
+
+	Log("Checking contents...")
+
 	if config, err := CheckCurrentProjectFolder(); err != nil {
 		log.Fatal(err)
 	} else {
@@ -76,7 +81,7 @@ func main() {
 func RunService() net.Listener {
 	l, err := net.Listen(ServiceType, ":"+ServicePort)
 	if err != nil {
-		fmt.Println("Error listening: ", err)
+		LogError(ErrorLog{err, fmt.Sprintf("Error listening: %v", err)})
 		os.Exit(1)
 	}
 
@@ -85,7 +90,7 @@ func RunService() net.Listener {
 			// Listen for an incoming connection.
 			conn, err := l.Accept()
 			if err != nil {
-				fmt.Println("Error accepting: ", err.Error())
+				LogError(ErrorLog{err, fmt.Sprintf("Error accepting: %v", err.Error())})
 				continue
 			}
 
@@ -115,7 +120,7 @@ func handleInternalCommand(c net.Conn) {
 
 	err := d.Decode(&msg)
 	if err != nil {
-		log.Printf(err.Error())
+		LogError(ErrorLog{err, err.Error()})
 	}
 
 	//TODO: handle master server commands and signals
@@ -131,9 +136,37 @@ func ProcessArgument(args ...string) error {
 		return ProcessTypeForRemove(args[1:]...)
 	case "update":
 		return ProcessTypeForUpdate(args[1:]...)
+	case "legal":
+		return ProcessLegalMenu(args[1:]...)
 	default:
 		return fmt.Errorf("unknown command: %v", args[0])
 	}
+}
+
+func ProcessLegalMenu(args ...string) error {
+	fmt.Println(`
+Few innovative works of Free and Open Source software have really helped
+designing, producing, and getting the Brute Web Engine to where it is
+today. Where it is a legal doctrine and a requirement that Brute must
+comply their license agreements, the command argument "legal" you have
+supplied will list all copyright notices of the libraries that Brute
+uses. On behalf of the Brute development community, thank you so much
+for providing these fantastic masterpieces!
+
+			                    - Ritchie Borja`)
+	NewLines(2)
+
+	prompt := promptui.Select{
+		Label: "Libraries Brute uses",
+		Items: Libraries(),
+	}
+
+	_, name, err := prompt.Run()
+	check(err)
+
+	fmt.Println(Summary(name))
+
+	return nil
 }
 
 func ProcessTypeForAdd(args ...string) error {
@@ -168,7 +201,7 @@ func ProcessTypeForAdd(args ...string) error {
 
 		CreateProjectFiles(config)
 
-		fmt.Printf("Endpoint %v successfully added\n", *name)
+		Log(fmt.Sprintf("Endpoint %v successfully added\n", *name))
 	default:
 		return fmt.Errorf("unknown feature %v", args[0])
 	}
@@ -226,7 +259,7 @@ func CheckExistingValidProject(files []os.FileInfo) (*brute.Config, error) {
 }
 
 func CreateNewProject() (*brute.Config, error) {
-	defer fmt.Println("Setup complete!")
+	defer Log("Setup complete!")
 
 	config := &brute.Config{}
 	defer CreateProjectFiles(config)

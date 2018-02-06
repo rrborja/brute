@@ -42,6 +42,7 @@ import (
 	"html/template"
 	"strings"
 	"github.com/rrborja/brute/client/html/meta/mime"
+	. "github.com/rrborja/brute/cmd/ui"
 	"net/url"
 )
 
@@ -94,7 +95,7 @@ type ControllerEndpoint struct {
 
 type RequestSession struct {
 	store map[[32]byte]*ContextHolder
-	sync.RWMutex
+	mutex sync.RWMutex
 }
 type ContextHolder struct {
 	RpcArguments map[string]string
@@ -125,8 +126,8 @@ func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *struct{Method string; Message url.Values; Arguments map[string]string}) error {
-	sessions.RLock()
-	defer sessions.RUnlock()
+	sessions.mutex.RLock()
+	defer sessions.mutex.RUnlock()
 
 	session := sessions.store[id]
 	ack.Method = session.Method
@@ -136,8 +137,8 @@ func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *struct{Method string
 }
 
 func (sessions *RequestSession) Write(packet *EchoPacket, ack *bool) error {
-	sessions.RLock()
-	defer sessions.RUnlock()
+	sessions.mutex.RLock()
+	defer sessions.mutex.RUnlock()
 
 	session := sessions.store[packet.SessionId]
 	session.Stream <- packet
@@ -147,8 +148,8 @@ func (sessions *RequestSession) Write(packet *EchoPacket, ack *bool) error {
 }
 
 func (sessions *RequestSession) Close(packet *EchoPacket, ack *bool) error {
-	sessions.RLock()
-	defer sessions.RUnlock()
+	sessions.mutex.RLock()
+	defer sessions.mutex.RUnlock()
 
 	session := sessions.store[packet.SessionId]
 	close(session.Stream)
@@ -258,7 +259,7 @@ func rebuildRootEndpoint(route Route) (string, error) {
 
 	reason, _ := ioutil.ReadAll(stdout)
 	if len(reason) > 0 {
-		fmt.Printf("%s\n", reason)
+		Log(fmt.Sprintf("%s", reason))
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -289,7 +290,7 @@ func buildEndpoint(route Route) {
 	}
 	go func(c <-chan notify.EventInfo) {
 		for range c {
-			fmt.Printf("Attempting to restart %s due to code changes...\n", route.Directory)
+			Log(fmt.Sprintf("Attempting to restart %s due to code changes...\n", route.Directory))
 			if endpoint, ok := endpoints.Load(route.Directory); ok {
 				_, err := rebuildEndpoint(route)
 				if err == nil {
@@ -301,7 +302,7 @@ func buildEndpoint(route Route) {
 
 				err = endpoint.(*ConnWriter).Close()
 				if err != nil {
-					fmt.Println(err)
+					LogError(ErrorLog{err, err.Error()})
 					debug.PrintStack()
 					// TODO: Fix by implementing a feature that will auto restart the endpoint's RPC connection
 				}
@@ -412,9 +413,9 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 	context := &ContextHolder{Stream: make(chan *EchoPacket, 100), End: make(chan bool, 1)}
 	defer close(context.End)
 
-	requestSession.Lock()
+	requestSession.mutex.Lock()
 	requestSession.store[sid] = context
-	requestSession.Unlock()
+	requestSession.mutex.Unlock()
 
 	context.Route = controller.Route
 
@@ -449,7 +450,7 @@ func StartEndpoints(config *Config) {
 }
 
 func StartRootEndpoint(route Route) {
-	fmt.Printf("Starting endpoint %s\n", route.Directory)
+	Log(fmt.Sprintf("Starting endpoint %s", route.Directory))
 
 	var out string
 	var env string
@@ -468,7 +469,7 @@ func StartRootEndpoint(route Route) {
 	//cmdOut, _ := cmd.StdoutPipe()
 	err := cmd.Start()
 	if err != nil {
-		fmt.Printf("Could not run endpoint daemon %s", route.Directory)
+		LogError(ErrorLog{err, fmt.Sprintf("Could not run endpoint daemon %s", route.Directory)})
 	}
 }
 
@@ -477,11 +478,11 @@ func StartEndpoint(route Route) {
 }
 
 func RunEndpointService() net.Listener {
-	fmt.Println("Starting Endpoint Service...")
+	Log("Starting Endpoint Service...")
 
 	l, err := net.Listen("tcp", ":11000")
 	if err != nil {
-		fmt.Println("Can't start listening for endpoints: ", err)
+		LogError(ErrorLog{err, fmt.Sprintf("Can't start listening for endpoints: %v", err)})
 		os.Exit(1)
 	}
 
@@ -490,10 +491,10 @@ func RunEndpointService() net.Listener {
 			// Listen for an incoming connection.
 			conn, err := l.Accept()
 
-			fmt.Println("Incoming connection:")
+			Log("Incoming endpoint connection: " + conn.RemoteAddr().String())
 
 			if err != nil {
-				fmt.Println("Error accepting: ", err.Error())
+				LogError(ErrorLog{err, fmt.Sprintf("Error accepting: %v", err.Error())})
 				continue
 			}
 
@@ -501,7 +502,7 @@ func RunEndpointService() net.Listener {
 			conn.Read(bin)
 
 			if !HandshakeFormat(bin) {
-				fmt.Println("Cannot accept an incoming connection")
+				Log("Cannot accept an incoming connection")
 				continue
 			}
 
@@ -514,7 +515,7 @@ func RunEndpointService() net.Listener {
 
 			routeDirectory := string(block)
 
-			fmt.Printf("Connection accepted from %s\n", routeDirectory)
+			Log(fmt.Sprintf("Connection accepted from %s\n", routeDirectory))
 
 			endpoints.Store(routeDirectory, &ConnWriter{Mutex: new(sync.Mutex), Conn: conn})
 		}
