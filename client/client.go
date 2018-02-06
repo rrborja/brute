@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"github.com/rrborja/brute/client/html/meta/mime"
+	clientHtml "github.com/rrborja/brute/client/html"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -91,10 +92,10 @@ func Handle(handler map[string]interface{}, callEvents <- chan Context) {
 			sessionId := gid.Get()
 
 			defer func(callEvent Context) {
-				renderStackHolder, ok := Writer(sessionId)
+				renderStackHolder, ok := clientHtml.Writer(sessionId)
 				if ok {
-					if len(renderStackHolder.headElements) > 0 || renderStackHolder.body != nil {
-						renderStackHolder.writer.Write([]byte("</body></html>"))
+					if len(renderStackHolder.HeadElements()) > 0 || renderStackHolder.Body() != nil {
+						renderStackHolder.Writer().Write([]byte("</body></html>"))
 					}
 				}
 
@@ -116,7 +117,7 @@ func Handle(handler map[string]interface{}, callEvents <- chan Context) {
 			handlerSessions.Set(sessionId, writer)
 			writerSessions.Set(sessionId, writer)
 
-			SetWriter(sessionId, &RenderStackHolder{root: new(RenderStack), writer: writer})
+			clientHtml.SetWriter(sessionId, clientHtml.CreateRenderStackHolder(new(clientHtml.RenderStack), writer))
 
 			// Start processing the endpoint while listening for writes to pass packets to the connected Client
 			if handler, ok := handlers[callEvent.Method]; ok {

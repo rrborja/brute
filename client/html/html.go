@@ -1,7 +1,7 @@
-package client
+package html
 
 import (
-	"github.com/rrborja/brute/client/attribs"
+	"github.com/rrborja/brute/client/html/attribs"
 	"github.com/rrborja/brute/client/html/meta"
 	"errors"
 	"github.com/rrborja/brute/client/html/meta/mime"
@@ -41,12 +41,28 @@ type RenderStackHolder struct {
 	headElements []interface{}
 
 	metaInfo *meta.MetaInfo
-	metaCharset *Attr
+	metaCharset *attribs.Attr
 
 	body interface{}
 
 	root *RenderStack
 	writer io.Writer
+}
+
+func CreateRenderStackHolder(root *RenderStack, writer io.Writer) *RenderStackHolder {
+	return &RenderStackHolder{root: root, writer: writer}
+}
+
+func (renderStackHolder *RenderStackHolder) HeadElements() []interface{} {
+	return renderStackHolder.headElements
+}
+
+func (renderStackHolder *RenderStackHolder) Writer() io.Writer {
+	return renderStackHolder.writer
+}
+
+func (renderStackHolder *RenderStackHolder) Body() interface{} {
+	return renderStackHolder.body
 }
 
 type RenderStack struct {
@@ -58,53 +74,6 @@ type RenderStack struct {
 }
 
 //var root = new(RenderStack)
-
-type TagAttr interface {
-	Name() string
-	Value() interface{}
-	String() string
-}
-
-type Attr struct {
-	name string
-	value interface{}
-}
-
-func NewAttr(name string, value interface{}) *Attr {
-	return &Attr{name, value}
-}
-
-func (attr *Attr) Name() string {
-	return attr.name
-}
-
-func (attr *Attr) Value() interface{} {
-	return attr.value
-}
-
-func (attr Attr) String() string {
-	switch v := attr.value.(type) {
-	case bool: if v { return fmt.Sprintf(`%s`, attr.Name()) }
-	default: return fmt.Sprintf(`%s="%s"`, attr.Name(), attr.Value())
-	}
-	return ""
-}
-
-type SelfAttr struct {
-	name string
-}
-
-func (selfAttr *SelfAttr) Name() string {
-	return selfAttr.name
-}
-
-func (selfAttr *SelfAttr) Value() interface{} {
-	return nil
-}
-
-func (selfAttr SelfAttr) String() string {
-	return selfAttr.Name()
-}
 
 func init() {
 	sessionWriter = make(map[int64]*RenderStackHolder)
@@ -123,7 +92,7 @@ func Charset(charSet CharSet) (err error) {
 	if *metaCharset != nil {
 		err = CharsetAlreadyDefinedError
 	}
-	*metaCharset = &Attr{name: "charset", value: charSet}
+	*metaCharset = attribs.NewAttr("charset", charSet)
 	return
 }
 
@@ -173,9 +142,9 @@ func Meta(metaType string, content string) {
 			Name: "meta",
 			SelfEnd: true,
 		},
-		Attributes_: []TagAttr{
-			&Attr{"name", metaType},
-			&Attr{"content",  content},
+		Attributes_: []attribs.TagAttr{
+			attribs.NewAttr("name", metaType),
+			attribs.NewAttr("content",  content),
 		},
 	})
 }
@@ -186,20 +155,20 @@ func PreloadStylesheet(href string) {
 			Name: "link",
 			SelfEnd: true,
 		},
-		Attributes_: []TagAttr{
-			&Attr{"rel", "stylesheet"},
-			&Attr{"type", mime.TextCss},
-			&Attr{"href", href},
+		Attributes_: []attribs.TagAttr{
+			attribs.NewAttr("rel", "stylesheet"),
+			attribs.NewAttr("type", mime.TextCss),
+			attribs.NewAttr("href", href),
 		},
 	})
 }
 
 func PreloadScript(href string, async ...bool) {
-	attr := []TagAttr{
-		&Attr{"src", href},
+	attr := []attribs.TagAttr{
+		attribs.NewAttr("src", href),
 	}
 	if len(async) > 0 && async[0] {
-		attr = append(attr, &SelfAttr{"async"})
+		attr = append(attr, attribs.NewSelfAttr("async"))
 	}
 	addHeadElements(Element{
 		Tag: Tag {
@@ -211,9 +180,9 @@ func PreloadScript(href string, async ...bool) {
 }
 
 func EmbedScript(code string, async ...bool) {
-	attr := make([]TagAttr, 0)
+	attr := make([]attribs.TagAttr, 0)
 	if len(async) > 0 && async[0] {
-		attr = append(attr, &SelfAttr{"async"})
+		attr = append(attr, attribs.NewSelfAttr("async"))
 	}
 	// TODO
 }
@@ -299,7 +268,7 @@ func NewElement(tag HtmlTag) *Element {
 	return element
 }
 
-func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []TagAttr) string {
+func renderBeginTag(tag Tag, id *attribs.Id, class []attribs.Class, attribs []attribs.TagAttr) string {
 	var initial string
 
 	if id != nil {
@@ -393,7 +362,7 @@ func joinClass(classes ...attribs.Class) string {
 	return strings.Join(values[:], " ")
 }
 
-func joinAttrs(attrs ...TagAttr) string {
+func joinAttrs(attrs ...attribs.TagAttr) string {
 	values := make([]string, len(attrs))
 	for i, attr := range attrs {
 		values[i] = attr.String()

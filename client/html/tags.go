@@ -1,14 +1,15 @@
-package client
+package html
 
 import (
 	"strings"
 	time_ "time"
 	"fmt"
+	"github.com/rrborja/brute/client/html/attribs"
 )
 
 type Tag struct {
 	Name HtmlTag
-	Attributes []TagAttr
+	Attributes []attribs.TagAttr
 	SelfEnd bool
 }
 
@@ -101,8 +102,8 @@ func Break() string {
 func Image(src string, alt ...string) string {
 	element := NewSelfElement(img, false)
 	if len(alt) > 0 {
-		element.Attributes_ = []TagAttr {
-			&Attr{name: "alt", value: strings.Join(alt, "")},
+		element.Attributes_ = []attribs.TagAttr {
+			attribs.NewAttr("alt", strings.Join(alt, "")),
 		}
 	}
 	return element.Value()
@@ -157,7 +158,7 @@ func H6() *Element {
 
 func A(href string) *Element {
 	aElement := NewElement(a)
-	aElement.Attributes_ = []TagAttr{&Attr{"href", href}}
+	aElement.Attributes_ = []attribs.TagAttr{attribs.NewAttr("href", href)}
 	return aElement
 }
 
@@ -212,8 +213,8 @@ func Summary() *Element {
 func Details(open ...bool) *Element {
 	element := NewElement(details)
 	if len(open) > 0 && open[0] {
-		element.Attributes_ = []TagAttr{
-			&Attr{"open", true},
+		element.Attributes_ = []attribs.TagAttr{
+			attribs.NewAttr("open", true),
 		}
 	}
 	return element
@@ -228,8 +229,8 @@ func Time(datetime *time_.Time, layout ...string) *Element {
 		finalLayout = strings.Join(layout, "")
 	}
 	element := NewElement(time)
-	element.Attributes_ = []TagAttr{
-		&Attr{"datetime", datetime.Format(finalLayout)},
+	element.Attributes_ = []attribs.TagAttr{
+		attribs.NewAttr("datetime", datetime.Format(finalLayout)),
 	}
 	return element
 }
@@ -240,8 +241,8 @@ func Address() *Element {
 
 func Abbreviation(title string) *Element {
 	element := NewElement(abbr)
-	element.Attributes_ = []TagAttr{
-		&Attr{"title", title},
+	element.Attributes_ = []attribs.TagAttr{
+		attribs.NewAttr("title", title),
 	}
 	return element
 }
@@ -259,10 +260,10 @@ func Submit(value string, classes ...string) *SubmitElement {
 	button.Tag = Tag{Name: HtmlTag("button")}
 
 	if len(classes) > 0 {
-		button.Attributes_ = append(button.Attributes_, &Attr{
-			name: "class",
-			value: strings.Join(classes, " "),
-		})
+		button.Attributes_ = append(button.Attributes_, attribs.NewAttr(
+			"class",
+			strings.Join(classes, " "),
+		))
 	}
 	button.Content = value
 
@@ -277,14 +278,14 @@ func Input() *Element {
 func inputElement(type_ string, name string, value ...string) string {
 	e := NewSelfElement(input, false)
 	e.SelfEnd = true
-	e.Attributes_ = []TagAttr{
-		&Attr{"type", type_},
-		&Attr{"name", name},
+	e.Attributes_ = []attribs.TagAttr{
+		attribs.NewAttr("type", type_),
+		attribs.NewAttr("name", name),
 	}
 	if len(value) > 0 {
-		e.Attributes_ = append(e.Attributes_, &Attr{
+		e.Attributes_ = append(e.Attributes_, attribs.NewAttr(
 			"value", strings.Join(value, ""),
-		})
+		))
 	}
 	return e.Value()
 }
@@ -314,24 +315,24 @@ func ColorPicker(name string, value string) string {
 // values[2] is value
 func minMaxInputElement(type_ string, name string, values ...string) string {
 	e := NewSelfElement(input, false)
-	e.Attributes_ = []TagAttr{
-		&Attr{"type", type_},
-		&Attr{"name", name},
+	e.Attributes_ = []attribs.TagAttr{
+		attribs.NewAttr("type", type_),
+		attribs.NewAttr("name", name),
 	}
 	if len(values) >= 1 && values[0] != "" {
-		e.Attributes_ = append(e.Attributes_, &Attr{
+		e.Attributes_ = append(e.Attributes_, attribs.NewAttr(
 			"min", values[0],
-		})
+		))
 	}
 	if len(values) >= 2 && values[1] != "" {
-		e.Attributes_ = append(e.Attributes_, &Attr{
+		e.Attributes_ = append(e.Attributes_, attribs.NewAttr(
 			"max", values[1],
-		})
+		))
 	}
 	if len(values) >= 3 && values[2] != "" {
-		e.Attributes_ = append(e.Attributes_, &Attr{
+		e.Attributes_ = append(e.Attributes_, attribs.NewAttr(
 			"value", values[2],
-		})
+		))
 	}
 	return e.Value()
 }

@@ -1,14 +1,14 @@
-package client
+package html
 
 import (
-	"github.com/rrborja/brute/client/attribs"
+	"github.com/rrborja/brute/client/html/attribs"
 	"fmt"
 )
 
 type Element struct {
 	Id_ *attribs.Id
 	Class_ []attribs.Class
-	Attributes_ []TagAttr
+	Attributes_ []attribs.TagAttr
 	Content interface{}
 
 	Tag
@@ -33,7 +33,7 @@ func (element *AfterIdElement) Class(value string) *AfterIdElement {
 	return element
 }
 
-func (element *AfterIdElement) Attributes(attribs ...TagAttr) *AfterIdElement {
+func (element *AfterIdElement) Attributes(attribs ...attribs.TagAttr) *AfterIdElement {
 	element.Attributes_ = attribs
 	return element
 }
@@ -104,8 +104,8 @@ func (element *AfterClassFormElement) Action(name string) *AfterActionFormElemen
 }
 
 func (element *FormElement) Action(path string) *AfterActionFormElement {
-	element.Attributes_ = []TagAttr{
-		&Attr{"action", path},
+	element.Attributes_ = []attribs.TagAttr{
+		attribs.NewAttr("action", path),
 	}
 	castedElement := AfterActionFormElement(*element)
 	return &castedElement
@@ -113,7 +113,7 @@ func (element *FormElement) Action(path string) *AfterActionFormElement {
 
 func (element *AfterActionFormElement) Get() *AfterMethodFormElement {
 	element.Attributes_ = append(element.Attributes_,
-		&Attr{"method", "get"},
+		attribs.NewAttr("method", "get"),
 	)
 	castedElement := AfterMethodFormElement(*element)
 	return &castedElement
@@ -121,13 +121,13 @@ func (element *AfterActionFormElement) Get() *AfterMethodFormElement {
 
 func (element *AfterActionFormElement) Post() *AfterMethodFormElement {
 	element.Attributes_ = append(element.Attributes_,
-		&Attr{"method", "post"},
+		attribs.NewAttr("method", "post"),
 	)
 	castedElement := AfterMethodFormElement(*element)
 	return &castedElement
 }
 
-func (element *AfterMethodFormElement) Attributes(attrib ...TagAttr) *AfterAttributesFormElement {
+func (element *AfterMethodFormElement) Attributes(attrib ...attribs.TagAttr) *AfterAttributesFormElement {
 	element.Attributes_ = append(element.Attributes_, attrib...)
 	castedElement := AfterAttributesFormElement(*element)
 	return &castedElement

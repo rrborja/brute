@@ -1,4 +1,4 @@
-package client
+package html
 
 type CharSet struct {
 	value string
