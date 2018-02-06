@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"net/http"
 	"net/url"
+	"github.com/rrborja/brute/client/html/meta/mime"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -40,6 +41,11 @@ type Context struct {
 	Rpc       	func(string, interface{}, interface{}) error
 
 	*sync.Mutex
+}
+
+func (context *Context) SetContentType(mime mime.Mime) {
+	var ack bool
+	context.Rpc("RequestSession.SetContentType", &brute.EchoPacket{context.SessionId, []byte(mime), 200}, &ack)
 }
 
 func (context *Context) Write(buf []byte) (n int, err error) {

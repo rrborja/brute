@@ -168,7 +168,11 @@ func Delegate(w http.ResponseWriter, stream <-chan *EchoPacket) {
 				Message string
 			}{projectName, string(buf.Body)})
 		default:
-			w.Write(buf.Body)
+			if len(buf.Body) >= 3 && string(buf.Body[:3]) == "~ct" {
+				w.Header().Set("Content-Type", string(buf.Body[3:]))
+			} else {
+				w.Write(buf.Body)
+			}
 		}
 	}
 }

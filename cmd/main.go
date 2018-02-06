@@ -20,10 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	//"github.com/manifoldco/promptui"
-	"github.com/rrborja/brute"
-	"github.com/rrborja/brute/cmd/templates"
-	"gopkg.in/yaml.v2"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -31,8 +27,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
 	"github.com/manifoldco/promptui"
+	"github.com/rrborja/brute"
+	"github.com/rrborja/brute/cmd/templates"
 	. "github.com/rrborja/brute/cmd/ui"
+	"gopkg.in/yaml.v2"
 )
 
 const (

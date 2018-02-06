@@ -255,6 +255,10 @@ func SetWriter(sessionId int64, renderStackHolder *RenderStackHolder) {
 	sessionWriterMutex.Unlock()
 }
 
+func SetContentType(writer io.Writer, mimeName mime.Mime) {
+	writer.Write([]byte("~ct" + mimeName))
+}
+
 func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
 	id := gid.Get()
 
@@ -267,6 +271,8 @@ func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
 		defer func() { renderStackHolder.body = new(interface{}) }()
 
 		writer := renderStackHolder.writer
+
+		SetContentType(writer, mime.TextHtml)
 
 		writer.Write([]byte("<!DOCTYPE html><html><head>"))
 		for _, _headElement := range renderStackHolder.headElements {
