@@ -6,16 +6,7 @@ import (
 	"fmt"
 )
 
-func Test() {
-	Map("_href", List(
-			Map("name", "ritchie"),
-		),
-	)
-	Map("id", 2)
-}
-
 type session struct {
-
 
 	endBuf chan interface{}
 	waitBuf chan interface{}
@@ -43,32 +34,41 @@ func (session *session) List(values ...interface{}) (element JsonString) {
 	panic("")
 }
 
-func (session *session) Map(key string, value interface{}) (entry JsonString) {
-	if session.Type == 0 {
-		session.Type = MAP
-		session.Write([]byte("{"))
+func (s *session) Map(key string, value interface{}) {
+	if s.Type == 0 {
+		s.Type = MAP
+		s.Write([]byte("{"))
 	} else {
-		session.Write([]byte(","))
+		s.Write([]byte(","))
 	}
+
+	var entry JsonString
 
 	switch v := value.(type) {
 	case int: entry = JsonString(fmt.Sprintf(`"%s":%d`, key, v))
 	case float32, float64: entry = JsonString(fmt.Sprintf(`"%s":%f`, key, value))
 	case string: entry = JsonString(fmt.Sprintf(`"%s":"%s"`, key, v))
-	case bool, JsonString: entry = JsonString(fmt.Sprintf(`"%s":%v`, key, v))
+	case bool: entry = JsonString(fmt.Sprintf(`"%s":%v`, key, v))
+	case func():
+		s.Write([]byte(fmt.Sprintf(`"%s":`, key)))
+		s.Type = 0
+		defer func(s *session) { s.Type = MAP }(s)
+		defer s.Write([]byte("}"))
+
+		v()
+
+		return
 	default: panic(fmt.Errorf("unknown type: %v", v))
 	}
 
-	session.Write([]byte(entry))
-
-	return
+	s.Write([]byte(entry))
 }
 
 type JsonString string
 
 type ResponseWriter interface {
 	List(value ...interface{}) JsonString
-	Map(key string, value interface{}) JsonString
+	Map(key string, value interface{})
 }
 
 var jsonWriterSession map[int64]ResponseWriter
@@ -112,7 +112,7 @@ func List(value ...interface{}) interface{} {
 	return JsonWriterSession(sessionId).List(value)
 }
 
-func Map(key string, value interface{}) interface{} {
+func Map(key string, value interface{}) {
 	sessionId := gid.Get()
-	return JsonWriterSession(sessionId).Map(key, value)
+	JsonWriterSession(sessionId).Map(key, value)
 }
