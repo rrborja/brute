@@ -4,39 +4,94 @@ import (
 	"github.com/silentred/gid"
 	"io"
 	"fmt"
+	"bufio"
 )
 
 type session struct {
 
-	endBuf chan interface{}
+	listStream ListFunc
+
+	touched bool
+
+	endBuf  chan interface{}
 	waitBuf chan interface{}
 
-	Type
-	io.Writer
+	jsonType Type
+	*bufio.Writer
 }
 
 type Type int
+
 const (
 	LIST = 1 << iota
 	MAP
 )
 
-func (session *session) List(values ...interface{}) (element JsonString) {
-	if session.Type == 0 {
-		session.Type = LIST
-		session.Write([]byte("["))
+func (s *session) Write(buf []byte) {
+	defer s.Writer.Flush()
+	s.Writer.Write(buf)
+}
+
+func (s *session) List(values ...interface{}) {
+	s.touched = true
+
+	if s.jsonType == 0 {
+		s.jsonType = LIST
+		s.Write([]byte("["))
+	} else {
+		s.Write([]byte(","))
 	}
 
-	//for _, value := range values {
-	//
-	//}
+	var start bool
 
-	panic("")
+	for _, value := range values {
+		if start {
+			s.Write([]byte(","))
+		} else {
+			start = true
+		}
+
+		switch v := value.(type) {
+		case func() interface{}:
+			newVal := v()
+			s.formatElement(newVal)
+		default:
+			s.formatElement(v)
+		}
+	}
+}
+func (s *session) formatElement(value interface{}) {
+	switch v := value.(type) {
+	case int, int8, int16, int32, int64,
+	uint, uint8, uint16, uint32, uint64:
+		s.Write([]byte(fmt.Sprintf("%d", v)))
+	case float32, float64:
+		s.Write([]byte(fmt.Sprintf("%f", v)))
+	case string:
+		s.Write([]byte(fmt.Sprintf(`"%s"`, v)))
+	case bool:
+		s.Write([]byte(fmt.Sprintf("%v", v)))
+	case func():
+		func(v func()) {
+			s.jsonType = 0
+			defer func(s *session) { s.jsonType = LIST }(s)
+			defer s.Write([]byte("}"))
+			v()
+		}(v)
+	default:
+		panic(fmt.Errorf("unknown type: %v", v))
+	}
+}
+
+func isOnSession(s ResponseWriter) bool {
+	return s.(*session).touched
 }
 
 func (s *session) Map(key string, value interface{}) {
-	if s.Type == 0 {
-		s.Type = MAP
+	s.touched = true
+
+	if s.jsonType == 0 {
+		s.jsonType = MAP
 		s.Write([]byte("{"))
 	} else {
 		s.Write([]byte(","))
@@ -45,30 +100,54 @@ func (s *session) Map(key string, value interface{}) {
 	var entry JsonString
 
 	switch v := value.(type) {
-	case int: entry = JsonString(fmt.Sprintf(`"%s":%d`, key, v))
-	case float32, float64: entry = JsonString(fmt.Sprintf(`"%s":%f`, key, value))
-	case string: entry = JsonString(fmt.Sprintf(`"%s":"%s"`, key, v))
-	case bool: entry = JsonString(fmt.Sprintf(`"%s":%v`, key, v))
+	case int, int8, int16, int32, int64,
+	uint, uint8, uint16, uint32, uint64:
+		entry = JsonString(fmt.Sprintf(`"%s":%d`, key, v))
+	case float32, float64:
+		entry = JsonString(fmt.Sprintf(`"%s":%f`, key, value))
+	case string:
+		entry = JsonString(fmt.Sprintf(`"%s":"%s"`, key, v))
+	case bool:
+		entry = JsonString(fmt.Sprintf(`"%s":%v`, key, v))
 	case func():
 		s.Write([]byte(fmt.Sprintf(`"%s":`, key)))
-		s.Type = 0
-		defer func(s *session) { s.Type = MAP }(s)
-		defer s.Write([]byte("}"))
+		s.jsonType = 0
+		defer func(s *session) { s.jsonType = MAP }(s)
+		defer func() { s.Write([]byte("}")) }()
 
 		v()
 
 		return
-	default: panic(fmt.Errorf("unknown type: %v", v))
+	case ListFunc:
+		s.Write([]byte(fmt.Sprintf(`"%s":`, key)))
+		s.jsonType = 0
+		defer func(s *session) { s.jsonType = MAP }(s)
+		defer func() { s.Write([]byte("]")) }()
+
+		v()
+
+		if s.listStream != nil {
+			s.listStream = nil
+		}
+
+		return
+	default:
+		panic(fmt.Errorf("unknown type: %v", v))
 	}
 
 	s.Write([]byte(entry))
 }
 
+func (s *session) Type() Type {
+	return s.jsonType
+}
+
 type JsonString string
 
 type ResponseWriter interface {
-	List(value ...interface{}) JsonString
+	List(value ...interface{})
 	Map(key string, value interface{})
+	Type() Type
 }
 
 var jsonWriterSession map[int64]ResponseWriter
@@ -81,13 +160,15 @@ func AddSession(sessionId int64, writer io.Writer) (chan interface{}, chan inter
 	endBuf := make(chan interface{})
 	waitBuf := make(chan interface{})
 
-	s := &session{endBuf: endBuf, waitBuf: waitBuf, Writer: writer}
+	s := &session{endBuf: endBuf, waitBuf: waitBuf, Writer: bufio.NewWriter(writer)}
 
 	go func(s *session) {
-		<- endBuf
-		switch s.Type {
-		case MAP: s.Write([]byte("}"))
-		case LIST: s.Write([]byte("]"))
+		<-endBuf
+		switch s.jsonType {
+		case MAP:
+			s.Write([]byte("}"))
+		case LIST:
+			s.Write([]byte("]"))
 		}
 		close(waitBuf)
 	}(s)
@@ -99,20 +180,47 @@ func AddSession(sessionId int64, writer io.Writer) (chan interface{}, chan inter
 
 func CloseSession(sessionId int64) {
 	s := jsonWriterSession[sessionId].(*session)
+
+	if s.listStream != nil {
+		s.listStream()
+		s.listStream = nil
+	}
+
 	close(s.endBuf)
-	<- s.waitBuf
+	s.endBuf = nil
+	<-s.waitBuf
 }
 
 func JsonWriterSession(sessionId int64) ResponseWriter {
 	return jsonWriterSession[sessionId]
 }
 
-func List(value ...interface{}) interface{} {
+type ListFunc func()
+
+func List(value ...interface{}) ListFunc {
 	sessionId := gid.Get()
-	return JsonWriterSession(sessionId).List(value)
+	s := JsonWriterSession(sessionId)
+
+	callback := func() {
+		s.List(value...)
+	}
+
+	if s.(*session).listStream != nil {
+		s.(*session).listStream()
+	}
+
+	s.(*session).listStream = callback
+
+	return callback
 }
 
 func Map(key string, value interface{}) {
 	sessionId := gid.Get()
 	JsonWriterSession(sessionId).Map(key, value)
+}
+
+func Element(value interface{}) func() interface{} {
+	return func() interface{} {
+		return value
+	}
 }
