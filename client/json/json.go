@@ -78,6 +78,14 @@ func (s *session) formatElement(value interface{}) {
 			defer s.Write([]byte("}"))
 			v()
 		}(v)
+	case ListFunc: {
+		func(v func()) {
+			s.jsonType = 0
+			defer func(s *session) { s.jsonType = LIST }(s)
+			defer s.Write([]byte("]"))
+			v()
+		}(v)
+	}
 	default:
 		panic(fmt.Errorf("unknown type: %v", v))
 	}
@@ -203,10 +211,7 @@ func List(value ...interface{}) ListFunc {
 
 	callback := func() {
 		s.List(value...)
-	}
-
-	if s.(*session).listStream != nil {
-		s.(*session).listStream()
+		s.(*session).listStream = nil
 	}
 
 	s.(*session).listStream = callback

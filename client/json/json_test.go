@@ -93,3 +93,34 @@ func TestMapWithList(t *testing.T) {
 
 	assert.Equal(t, `{"list":[1,2,3],"element":true}`, reader.String())
 }
+
+func TestListWithinList(t *testing.T) {
+	reader := bytes.NewBufferString("")
+	AddSession(gid.Get(), reader)
+
+	List(
+		Element(
+			List(1,2,3)),
+		4,5,
+	)
+
+	CloseSession(gid.Get())
+
+	assert.Equal(t, `[[1,2,3],4,5]`, reader.String())
+}
+
+func TestListAndAnotherList(t *testing.T) {
+	reader := bytes.NewBufferString("")
+	AddSession(gid.Get(), reader)
+
+	List(
+		1,2,3,
+	)()
+	List(
+		4,5,
+	)()
+
+	CloseSession(gid.Get())
+
+	assert.Equal(t, `[1,2,3,4,5]`, reader.String())
+}
