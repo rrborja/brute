@@ -233,10 +233,15 @@ func Writer(sessionId client.SessionId) (renderStackHolder *RenderStackHolder, o
 		if done, ok := sessionId.Cleanup(); !ok {
 			panic("Unexpected error occurred")
 		} else {
-			<-done
-		}
-		if len(renderStackHolder.HeadElements()) > 0 || renderStackHolder.Body() != nil {
-			renderStackHolder.Writer().Write([]byte("</body></html>"))
+			cleansed := make(chan func())
+			done <- cleansed
+
+			cleansed <- func() {
+				if len(renderStackHolder.HeadElements()) > 0 || renderStackHolder.Body() != nil {
+					client.Out([]byte("</body></html>"))
+				}
+			}
+			close(cleansed)
 		}
 	}()
 

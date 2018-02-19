@@ -11,17 +11,22 @@ func (sessionId SessionId) Persist() bool {
 	if _, ok := sessionSignals[sessionId]; ok {
 		return false
 	}
-	sessionSignals[sessionId] = make(chan interface{})
+	sessionSignals[sessionId] = make(chan chan func())
 	return true
 }
 
-func (sessionId SessionId) Cleanup() (done chan interface{}, ok bool) {
+func (sessionId SessionId) Cleanup() (done chan chan func(), ok bool) {
 	done, ok = sessionSignals[sessionId]
-	delete(sessionSignals, sessionId)
 	return
 }
 
-type SessionSignals map[SessionId]chan interface{}
+func (sessionId SessionId) Purge() {
+	delete(sessionSignals, sessionId)
+	delete(handlerSessions, sessionId)
+	delete(writerSessions, sessionId)
+}
+
+type SessionSignals map[SessionId]chan chan func()
 var sessionSignals SessionSignals
 
 type HandlerSessions map[SessionId]Handler

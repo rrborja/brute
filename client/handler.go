@@ -19,7 +19,9 @@ func Handle(handler map[string]interface{}, callEvents <- chan Context) {
 
 			defer func(callEvent Context) {
 				if done, ok := sessionId.Cleanup(); ok {
-					<-done
+					(<- <-done)()
+					close(done)
+					sessionId.Purge()
 				}
 
 				var ack bool
