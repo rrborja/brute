@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cmd
 
 import (
 	"bufio"
@@ -31,8 +31,9 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/rrborja/brute"
 	"github.com/rrborja/brute/cmd/templates"
-	. "github.com/rrborja/brute/cmd/ui"
 	"gopkg.in/yaml.v2"
+
+	. "github.com/rrborja/brute/log"
 )
 
 const (
@@ -40,43 +41,6 @@ const (
 	ServicePort = "11792"
 	ServiceType = "tcp"
 )
-
-// brute set remote -url="192.168.1.152"
-// brute unset remote
-// brute check remote
-// brute add endpoint -name=Ritchie -path=borja
-// brute remove endpoint -name=Ritchie
-// brute update endpoint -name=Ritchie
-func main() {
-	if len(os.Args) > 1 {
-		if err := ProcessArgument(os.Args[1:]...); err != nil {
-			check(err)
-		} else {
-			os.Exit(0)
-		}
-	}
-
-	go RunTerminal()
-
-	Log("Checking contents...")
-
-	if config, err := CheckCurrentProjectFolder(); err != nil {
-		log.Fatal(err)
-	} else {
-		brute.New(config)
-
-		brute.SetProjectName(config.Name)
-
-		l := RunService()
-		defer l.Close()
-
-		e := brute.RunEndpointService()
-		defer e.Close()
-
-		brute.StartEndpoints(config)
-		brute.Deploy(config)
-	}
-}
 
 func RunService() net.Listener {
 	l, err := net.Listen(ServiceType, ":"+ServicePort)

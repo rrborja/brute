@@ -1,15 +1,12 @@
-package ui
+package log
 
 import (
 	"sync"
 	"fmt"
 	"strings"
-	"github.com/jroimartin/gocui"
 )
 
 var lock sync.Mutex
-
-var gv *gocui.Gui
 
 var _Log chan string
 
@@ -38,31 +35,12 @@ func init() {
 	go logError(_LogError)
 }
 
-func EnsureGui() {
-	if gv == nil {
-		gv = <- globalView
-	}
-}
-
 func newLines(countChan <- chan int) {
 	for count := range countChan {
 		func(count int) {
-			EnsureGui()
-
-			gv.Update(func(g *gocui.Gui) error {
-				lock.Lock()
-				defer lock.Unlock()
-
-				loggerGui, err := g.View("logs")
-				if err != nil {
-					panic(err)
-				}
-
-				fmt.Fprint(loggerGui, strings.Repeat("\n", count))
-				return nil
-				})
 			lock.Lock()
-			lock.Unlock()
+			defer lock.Unlock()
+			fmt.Print(strings.Repeat("\n", count))
 		}(count)
 	}
 }
@@ -70,28 +48,11 @@ func newLines(countChan <- chan int) {
 func _log(messageChan <- chan string) {
 	for message := range messageChan {
 		func(message string) {
-			EnsureGui()
 
-			gv.Update(func(g *gocui.Gui) error {
-				lock.Lock()
-				defer lock.Unlock()
-
-				loggerGui, err := g.View("logs")
-				if err != nil {
-					panic(err)
-				}
-
-				fmt.Fprint(loggerGui, "[LOG] ")
-				if message[len(message)-1] == '\n' {
-					fmt.Fprint(loggerGui, message)
-				} else {
-					fmt.Fprintln(loggerGui, message)
-				}
-
-				return nil
-			})
 			lock.Lock()
-			lock.Unlock()
+			defer lock.Unlock()
+			fmt.Println("[LOG] " + message)
+
 		}(message)
 	}
 }

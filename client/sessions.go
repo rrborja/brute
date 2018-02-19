@@ -5,22 +5,41 @@ import (
 	"io"
 )
 
-type HandlerSessions map[int64]Handler
-type WriterSessions map[int64]io.Writer
+type SessionId int64
+
+func (sessionId SessionId) Persist() bool {
+	if _, ok := sessionSignals[sessionId]; ok {
+		return false
+	}
+	sessionSignals[sessionId] = make(chan interface{})
+	return true
+}
+
+func (sessionId SessionId) Cleanup() (done chan interface{}, ok bool) {
+	done, ok = sessionSignals[sessionId]
+	delete(sessionSignals, sessionId)
+	return
+}
+
+type SessionSignals map[SessionId]chan interface{}
+var sessionSignals SessionSignals
+
+type HandlerSessions map[SessionId]Handler
+type WriterSessions map[SessionId]io.Writer
 
 var (
 	handlerSessions HandlerSessions
 	handlerSessionsMutex sync.RWMutex
 )
 
-func (handlerSession HandlerSessions) Get(sessionId int64) (handler Handler, ok bool) {
+func (handlerSession HandlerSessions) Get(sessionId SessionId) (handler Handler, ok bool) {
 	handlerSessionsMutex.RLock()
 	defer handlerSessionsMutex.RUnlock()
 
 	handler, ok = handlerSession[sessionId]
 	return
 }
-func (handlerSession HandlerSessions) Set(sessionId int64, handler Handler) {
+func (handlerSession HandlerSessions) Set(sessionId SessionId, handler Handler) {
 	handlerSessionsMutex.Lock()
 	defer handlerSessionsMutex.Unlock()
 
@@ -32,14 +51,14 @@ var (
 	writerSessionsMutex sync.RWMutex
 )
 
-func (writerSession WriterSessions) Get(sessionId int64) (writer io.Writer, ok bool) {
+func (writerSession WriterSessions) Get(sessionId SessionId) (writer io.Writer, ok bool) {
 	writerSessionsMutex.RLock()
 	defer writerSessionsMutex.RUnlock()
 
 	writer, ok = writerSession[sessionId]
 	return
 }
-func (writerSession WriterSessions) Set(sessionId int64, writer io.Writer) {
+func (writerSession WriterSessions) Set(sessionId SessionId, writer io.Writer) {
 	writerSessionsMutex.Lock()
 	defer writerSessionsMutex.Unlock()
 
@@ -50,4 +69,5 @@ func (writerSession WriterSessions) Set(sessionId int64, writer io.Writer) {
 func init() {
 	handlerSessions = make(HandlerSessions)
 	writerSessions = make(WriterSessions)
+	sessionSignals = make(SessionSignals)
 }

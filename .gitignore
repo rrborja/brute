@@ -2,3 +2,8 @@
 
 cmd/test
 cmd/test/*
+
+Godeps/*
+vendor/*
+Gopkg.toml
+Gopkg.lock

@@ -1,4 +1,4 @@
-package mime
+package client
 
 type Mime string
 

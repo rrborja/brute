@@ -1,16 +1,17 @@
 package html
 
 import (
-	"github.com/rrborja/brute/client/html/attribs"
-	"github.com/rrborja/brute/client/html/meta"
 	"errors"
-	"github.com/rrborja/brute/client/html/meta/mime"
 	"fmt"
 	"strings"
-	"github.com/silentred/gid"
 	"html"
 	"io"
 	"sync"
+
+	"github.com/rrborja/brute/client"
+	"github.com/rrborja/brute/client/html/attribs"
+	"github.com/rrborja/brute/client/html/meta"
+	"github.com/silentred/gid"
 )
 
 //var title *string
@@ -27,7 +28,7 @@ var (
 
 var htmlStream chan string
 
-var sessionWriter map[int64]*RenderStackHolder
+var sessionWriter map[client.SessionId]*RenderStackHolder
 var sessionWriterMutex = sync.RWMutex{}
 
 type Html struct {
@@ -76,11 +77,11 @@ type RenderStack struct {
 //var root = new(RenderStack)
 
 func init() {
-	sessionWriter = make(map[int64]*RenderStackHolder)
+	sessionWriter = make(map[client.SessionId]*RenderStackHolder)
 }
 
 func Charset(charSet CharSet) (err error) {
-	sessionId := gid.Get()
+	sessionId := client.Gid()
 	renderStackHolder, ok := Writer(sessionId)
 
 	if !ok {
@@ -98,7 +99,7 @@ func Charset(charSet CharSet) (err error) {
 
 func Title(name string) (err error) {
 	sessionId := gid.Get()
-	renderStackHolder, ok := Writer(sessionId)
+	renderStackHolder, ok := Writer(client.Gid())
 
 	if !ok {
 		return fmt.Errorf("cannot set page's title since the session %v expired or does not exist", sessionId)
@@ -157,7 +158,7 @@ func PreloadStylesheet(href string) {
 		},
 		Attributes_: []attribs.TagAttr{
 			attribs.NewAttr("rel", "stylesheet"),
-			attribs.NewAttr("type", mime.TextCss),
+			attribs.NewAttr("type", client.TextCss),
 			attribs.NewAttr("href", href),
 		},
 	})
@@ -188,7 +189,7 @@ func EmbedScript(code string, async ...bool) {
 }
 
 func addHeadElements(element interface{}) (err error) {
-	sessionId := gid.Get()
+	sessionId := client.Gid()
 	renderStackHolder, ok := Writer(sessionId)
 
 	if !ok {
@@ -211,25 +212,49 @@ type syntax struct {
 	children []syntax
 }
 
-func Writer(sessionId int64) (renderStackHolder *RenderStackHolder, ok bool) {
-	sessionWriterMutex.RLock()
-	renderStackHolder, ok = sessionWriter[sessionId]
-	sessionWriterMutex.RUnlock()
+type htmlWriter func(p []byte) (n int, err error)
+
+func (writer htmlWriter) Write(p []byte) (n int, err error) {
+	return writer(p)
+}
+
+func Writer(sessionId client.SessionId) (renderStackHolder *RenderStackHolder, ok bool) {
+	sessionWriterMutex.Lock()
+	defer sessionWriterMutex.Unlock()
+	if renderStackHolder, ok := sessionWriter[sessionId]; ok {
+		return renderStackHolder, ok
+	}
+
+	writer := htmlWriter(client.Out)
+	renderStackHolder, ok = CreateRenderStackHolder(new(RenderStack), writer), true
+	sessionWriter[sessionId] = renderStackHolder
+
+	go func() {
+		if done, ok := sessionId.Cleanup(); !ok {
+			panic("Unexpected error occurred")
+		} else {
+			<-done
+		}
+		if len(renderStackHolder.HeadElements()) > 0 || renderStackHolder.Body() != nil {
+			renderStackHolder.Writer().Write([]byte("</body></html>"))
+		}
+	}()
+
 	return
 }
 
-func SetWriter(sessionId int64, renderStackHolder *RenderStackHolder) {
-	sessionWriterMutex.Lock()
-	sessionWriter[sessionId] = renderStackHolder
-	sessionWriterMutex.Unlock()
-}
+//func SetWriter(sessionId int64, renderStackHolder *RenderStackHolder) {
+//	sessionWriterMutex.Lock()
+//	sessionWriter[sessionId] = renderStackHolder
+//	sessionWriterMutex.Unlock()
+//}
 
-func SetContentType(writer io.Writer, mimeName mime.Mime) {
+func SetContentType(writer io.Writer, mimeName client.Mime) {
 	writer.Write([]byte("~ct" + mimeName))
 }
 
 func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
-	id := gid.Get()
+	id := client.Gid()
 
 	renderStackHolder, ok = Writer(id)
 	if !ok {
@@ -241,9 +266,13 @@ func checkNewBody() (renderStackHolder *RenderStackHolder, ok bool) {
 
 		writer := renderStackHolder.writer
 
-		SetContentType(writer, mime.TextHtml)
+		SetContentType(writer, client.TextHtml)
 
 		writer.Write([]byte("<!DOCTYPE html><html><head>"))
+
+		// TODO: Implement a condition to check whether this element needs to be generated
+		writer.Write([]byte(`<meta charset="UTF-8">`))
+
 		for _, _headElement := range renderStackHolder.headElements {
 			headElement := _headElement
 			switch v := headElement.(type) {

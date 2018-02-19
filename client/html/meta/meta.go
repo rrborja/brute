@@ -1,8 +1,8 @@
 package meta
 
 import (
-	"github.com/rrborja/brute/client/html/meta/mime"
 	"fmt"
+	"github.com/rrborja/brute/client"
 )
 
 type HttpEquiv string
@@ -25,7 +25,7 @@ const (
 )
 
 type ContentType struct {
-	Value mime.Mime
+	Value client.Mime
 }
 
 func (contentType ContentType) Render() [2]string {

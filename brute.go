@@ -41,9 +41,8 @@ import (
 	"github.com/rrborja/brute/assets"
 	"html/template"
 	"strings"
-	"github.com/rrborja/brute/client/html/meta/mime"
-	. "github.com/rrborja/brute/cmd/ui"
 	"net/url"
+	. "github.com/rrborja/brute/log"
 )
 
 var cwd = ""
@@ -202,6 +201,14 @@ func loadTemplates() {
 }
 
 func New(config *Config) {
+	os.Mkdir("bin/endpoints", 0700)
+	os.Mkdir("bin/hosted", 0700)
+	os.Mkdir("bin/hosted/static", 0700)
+	os.Mkdir("bin/hosted/assets", 0700)
+	os.Mkdir("bin/temp", 0700)
+	os.Mkdir("bin/temp/db", 0700)
+	os.Mkdir("bin/build", 0700)
+
 	for _, route := range config.Routes {
 		buildEndpoint(route)
 	}
@@ -236,6 +243,8 @@ func CleanUp() {
 }
 
 func rebuildRootEndpoint(route Route) (string, error) {
+	Log("Building " + route.Directory)
+
 	tmpBuilds := filepath.Join("bin", "build")
 	endpointBuilds := filepath.Join("bin", "endpoints")
 
@@ -269,6 +278,7 @@ func rebuildRootEndpoint(route Route) (string, error) {
 	if err := cmd.Wait(); err != nil {
 		return "", err
 	} else {
+		Log("Done!\n")
 		err := os.Rename(out, filepath.Join(cwd, endpointBuilds, route.Directory))
 		if err != nil {
 			panic(err)
@@ -329,13 +339,6 @@ func HostRootEndpoint() {
 
 func Deploy(config *Config) {
 	CleanUp()
-	os.Mkdir("bin/endpoints", 0700)
-	os.Mkdir("bin/hosted", 0700)
-	os.Mkdir("bin/hosted/static", 0700)
-	os.Mkdir("bin/hosted/assets", 0700)
-	os.Mkdir("bin/temp", 0700)
-	os.Mkdir("bin/temp/db", 0700)
-	os.Mkdir("bin/build", 0700)
 
 	for _, route := range config.Routes {
 		build := filepath.Join(cwd, "bin", "endpoints", route.Directory)
@@ -347,7 +350,7 @@ func Deploy(config *Config) {
 	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Accept-Ranges", "bytes")
 		w.Header().Set("Server", "brute.io")
-		w.Header().Set("Content-Type", string(mime.ImageIcon))
+		w.Header().Set("Content-Type", "image/x-icon")
 		w.Header().Set("ETag", `"1"`)
 		favicon, _ := assets.Asset("static/default-pages/favicon.ico")
 		w.Write(favicon)
