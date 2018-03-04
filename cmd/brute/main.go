@@ -1,5 +1,7 @@
 package main
 
+//go:generate echo "hello world"
+
 import (
 	"os"
 	"log"

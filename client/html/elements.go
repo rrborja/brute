@@ -22,6 +22,13 @@ func (element Element) Value(value interface{}) string {
 	return e.Value(value)
 }
 
+func (element *Element) Id(name string) *AfterIdElement {
+	id := attribs.Id(name)
+	element.Id_ = &id
+	e := AfterIdElement(*element)
+	return &e
+}
+
 func (element *Element) Class(value string) *AfterIdElement {
 	e := AfterIdElement(*element)
 	return e.Class(value)

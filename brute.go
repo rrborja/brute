@@ -43,6 +43,7 @@ import (
 	"strings"
 	"net/url"
 	. "github.com/rrborja/brute/log"
+	"errors"
 )
 
 var cwd = ""
@@ -52,22 +53,48 @@ var projectName string
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
 
+var (
+	noSuchRouteError = errors.New("no such route")
+)
+
 var r *mux.Router
 
-var endpoints sync.Map
+var endpoints CustomConcurrentMap
 
 var requestSession RequestSession
 
 var template404Page *template.Template
 var template700Page *template.Template
 
-type ConnWriter struct {
+type ConnWrite struct {
 	io.Reader
 	net.Conn
 	*sync.Mutex
 }
 
-func (connWriter *ConnWriter) Write(data []byte) (int, error) {
+type CustomConcurrentMap struct {
+	sync.Map
+}
+
+func (customerConcurrentMap *CustomConcurrentMap) Load(key string) (ConnWriter, bool) {
+	value, ok := customerConcurrentMap.Map.Load(key)
+	return value.(ConnWriter), ok
+}
+
+func (customerConcurrentMap *CustomConcurrentMap) Store(key string, value ConnWriter) {
+	customerConcurrentMap.Map.Store(key, value)
+}
+
+func (customerConcurrentMap *CustomConcurrentMap) Delete(key string) {
+	customerConcurrentMap.Map.Delete(key)
+}
+
+type ConnWriter interface {
+	Close() error
+	Write([]byte) (int, error)
+}
+
+func (connWriter *ConnWrite) Write(data []byte) (int, error) {
 	connWriter.Lock()
 	defer connWriter.Unlock()
 
@@ -201,13 +228,15 @@ func loadTemplates() {
 }
 
 func New(config *Config) {
-	os.Mkdir("bin/endpoints", 0700)
-	os.Mkdir("bin/hosted", 0700)
-	os.Mkdir("bin/hosted/static", 0700)
-	os.Mkdir("bin/hosted/assets", 0700)
-	os.Mkdir("bin/temp", 0700)
-	os.Mkdir("bin/temp/db", 0700)
-	os.Mkdir("bin/build", 0700)
+	//os.Mkdir("bin", 0700)
+	os.MkdirAll("bin/endpoints", 0700)
+	//os.Mkdir("bin/hosted", 0700)
+	os.MkdirAll("bin/hosted/static", 0700)
+	os.MkdirAll("bin/hosted/assets", 0700)
+	//os.Mkdir("bin/temp", 0700)
+	os.MkdirAll("bin/temp/db", 0700)
+	os.MkdirAll("bin/temp/broken", 0700)
+	os.MkdirAll("bin/build", 0700)
 
 	for _, route := range config.Routes {
 		buildEndpoint(route)
@@ -252,6 +281,10 @@ func rebuildRootEndpoint(route Route) (string, error) {
 	if len(route.Path) > 0 {
 		out = filepath.Join(cwd, tmpBuilds, route.Directory)
 		routeDirectory = filepath.Join(cwd, "src", route.Directory)
+
+		if _, err := os.Stat(routeDirectory); os.IsNotExist(err) {
+			return "", noSuchRouteError
+		}
 	} else {
 		out = filepath.Join(cwd, tmpBuilds, "root")
 		routeDirectory = filepath.Join(cwd, "src")
@@ -272,7 +305,10 @@ func rebuildRootEndpoint(route Route) (string, error) {
 
 	reason, _ := ioutil.ReadAll(stdout)
 	if len(reason) > 0 {
-		Log(fmt.Sprintf("%s", reason))
+		Log(fmt.Sprintf("Build error for endpoint %s", route.Directory))
+		dat, _ := ioutil.ReadFile(sourceFile)
+		//check(err)
+		BuildDebugEndpoint(route, dat, reason)
 	}
 
 	if err := cmd.Wait(); err != nil {
@@ -295,7 +331,8 @@ func rebuildEndpoint(route Route) (string, error) {
 func buildEndpoint(route Route) {
 	sourceEndpointDirectory, err := rebuildEndpoint(route)
 	if err != nil {
-		panic(err)
+		LogError(ErrorLog{err, err.Error()})
+		return
 	}
 
 	c := make(chan notify.EventInfo, 1)
@@ -314,7 +351,7 @@ func buildEndpoint(route Route) {
 					log.Println(err)
 				}
 
-				err = endpoint.(*ConnWriter).Close()
+				err = endpoint.Close()
 				if err != nil {
 					LogError(ErrorLog{err, err.Error()})
 					debug.PrintStack()
@@ -406,15 +443,25 @@ func (controller *ControllerEndpoint) RedirectEndpointOnLoading(w http.ResponseW
 	w.Write([]byte("Endpoint " + controller.Directory + " is still loading. Try again for a few seconds"))
 }
 
+func (controller *ControllerEndpoint) RedirectEndpointOnError(w http.ResponseWriter, r *http.Request, logic func() []byte) {
+	w.Write(logic())
+}
+
 func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sid := RandomSessionId(r.RemoteAddr, time.Now().Unix())
 
 	w.Header().Set("X-Brute-Session-ID", hex.EncodeToString(sid[:]))
 	w.Header().Set("Server", "brute.io")
 
-	if _, ok := endpoints.Load(controller.Route.Directory); !ok {
+	if val, ok := endpoints.Load(controller.Route.Directory); !ok {
 		controller.RedirectEndpointOnLoading(w, r)
 		return
+	} else {
+		switch v := val.(type) {
+		case EndpointFunc:
+			controller.RedirectEndpointOnError(w, r, v)
+			return
+		}
 	}
 
 	context := &ContextHolder{Stream: make(chan *EchoPacket, 100), End: make(chan bool, 1)}
@@ -442,7 +489,7 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 	context.Message = r.Form
 
 	if endpoint, ok := endpoints.Load(controller.Route.Directory); ok {
-		endpoint.(*ConnWriter).Write(sid[:])
+		endpoint.Write(sid[:])
 	}
 
 	Delegate(w, context.Stream)
@@ -524,7 +571,7 @@ func RunEndpointService() net.Listener {
 
 			Log(fmt.Sprintf("Connection accepted from %s\n", routeDirectory))
 
-			endpoints.Store(routeDirectory, &ConnWriter{Mutex: new(sync.Mutex), Conn: conn})
+			endpoints.Store(routeDirectory, &ConnWrite{Mutex: new(sync.Mutex), Conn: conn})
 		}
 	}()
 
@@ -548,6 +595,6 @@ func RandomNumber() uint16 {
 
 func check(err error) {
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("[ERROR]", err)
 	}
 }

@@ -7,8 +7,6 @@ import (
 	"runtime"
 	"os"
 	"net/http"
-
-	"github.com/rrborja/brute"
 )
 
 func Handle(handler map[string]interface{}, callEvents <- chan Context) {
@@ -26,7 +24,7 @@ func Handle(handler map[string]interface{}, callEvents <- chan Context) {
 
 				var ack bool
 				if err := callEvent.Rpc("RequestSession.Close",
-					&brute.EchoPacket{SessionId: callEvent.SessionId},
+					&EchoPacket{SessionId: callEvent.SessionId},
 					&ack); err != nil {
 					panic(err)
 				}

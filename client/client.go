@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"github.com/rrborja/brute"
 	"github.com/silentred/gid"
 	"log"
 	"net"
@@ -13,8 +12,6 @@ import (
 	"reflect"
 	"net/http"
 	"net/url"
-	//"github.com/rrborja/brute/client/html/meta/mime"
-	//clientHtml "github.com/rrborja/brute/client/html"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -30,7 +27,13 @@ type Handler interface {
 	Lock()
 	Unlock()
 	Write([]byte) (int, error)
-	Call(string, *brute.EchoPacket, *bool) error
+	Call(string, *EchoPacket, *bool) error
+}
+
+type EchoPacket struct {
+	SessionId [32]byte
+	Body      []byte
+	Code	  int
 }
 
 type Context struct {
@@ -46,12 +49,12 @@ type Context struct {
 
 func (context *Context) SetContentType(mime string) {
 	var ack bool
-	context.Rpc("RequestSession.SetContentType", &brute.EchoPacket{context.SessionId, []byte(mime), 200}, &ack)
+	context.Rpc("RequestSession.SetContentType", &EchoPacket{context.SessionId, []byte(mime), 200}, &ack)
 }
 
 func (context *Context) Write(buf []byte) (n int, err error) {
 	var ack bool
-	err = context.Rpc("RequestSession.Write", &brute.EchoPacket{context.SessionId, buf, 200}, &ack)
+	err = context.Rpc("RequestSession.Write", &EchoPacket{context.SessionId, buf, 200}, &ack)
 	n = len(buf)
 	return
 }
@@ -64,7 +67,7 @@ func (context *Context) Unlock() {
 	context.Mutex.Unlock()
 }
 
-func (context *Context) Call(functionName string, packet *brute.EchoPacket, ack *bool) error {
+func (context *Context) Call(functionName string, packet *EchoPacket, ack *bool) error {
 	return context.Rpc(functionName, packet, ack)
 }
 
@@ -93,7 +96,7 @@ func SystemMessage(message string) {
 	defer context.Unlock()
 
 	var ack bool
-	context.Call("RequestSession.Write", &brute.EchoPacket{context.(*Context).SessionId, []byte(message), 700}, &ack)
+	context.Call("RequestSession.Write", &EchoPacket{context.(*Context).SessionId, []byte(message), 700}, &ack)
 }
 
 func With(handlers ...interface{}) []interface{} {

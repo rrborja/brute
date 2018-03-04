@@ -2,7 +2,6 @@ package log
 
 import (
 	"sync"
-	"fmt"
 	"strings"
 )
 
@@ -40,7 +39,7 @@ func newLines(countChan <- chan int) {
 		func(count int) {
 			lock.Lock()
 			defer lock.Unlock()
-			fmt.Print(strings.Repeat("\n", count))
+			print(strings.Repeat("\n", count))
 		}(count)
 	}
 }
@@ -51,7 +50,7 @@ func _log(messageChan <- chan string) {
 
 			lock.Lock()
 			defer lock.Unlock()
-			fmt.Println("[LOG] " + message)
+			println("[LOG] " + message)
 
 		}(message)
 	}

@@ -203,8 +203,14 @@ func addHeadElements(element interface{}) (err error) {
 	return
 }
 
-func Escape(content string) string {
-	return strings.Replace(html.EscapeString(content), "\n", " ", -1)
+func Escape(val interface{}) string {
+	switch val.(type) {
+	case UnsafeString:
+		return fmt.Sprintf("%v", val)
+	default:
+		content := fmt.Sprintf("%v", val)
+		return strings.Replace(html.EscapeString(content), "\n", " ", -1)
+	}
 }
 
 type syntax struct {
@@ -379,13 +385,19 @@ func (stack *RenderStackHolder) evaluate(element Element) string {
 
 		return result
 	default:
-		result := begin + Escape(fmt.Sprintf("%v", val)) + end
+		result := begin + Escape(val) + end
 		stack.root.content = string(append([]byte(stack.root.content), result...))
 
 		stack.writer.Write([]byte(result))
 
 		return result
 	}
+}
+
+type UnsafeString string
+
+func Entity(entity string) UnsafeString {
+	return UnsafeString("&" + entity + ";")
 }
 
 func joinClass(classes ...attribs.Class) string {
