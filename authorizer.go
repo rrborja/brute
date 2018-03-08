@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"path/filepath"
 	"context"
-	"fmt"
 )
 
 var authorizeHandler *ControllerEndpoint
