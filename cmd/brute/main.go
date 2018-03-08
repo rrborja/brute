@@ -47,6 +47,8 @@ func main() {
 		e := RunEndpointService()
 		defer e.Close()
 
+		StartAuthorizer(config)
+
 		StartEndpoints(config)
 		Deploy(config)
 	}

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"net/http"
 	"net/url"
+	"errors"
 )
 
 var magicNumber = []byte{0x62, 0x72, 0x75, 0x74, 0x65}
@@ -27,6 +28,7 @@ type Handler interface {
 	Lock()
 	Unlock()
 	Write([]byte) (int, error)
+	WriteHeader(statusCode int) error
 	Call(string, *EchoPacket, *bool) error
 }
 
@@ -40,6 +42,7 @@ type Context struct {
 	Name 		string
 	SessionId 	[32]byte
 	Method 		string
+	StatusCode  *int
 	Message
 	Arguments 	map[string]string
 	Rpc       	func(string, interface{}, interface{}) error
@@ -52,9 +55,21 @@ func (context *Context) SetContentType(mime string) {
 	context.Rpc("RequestSession.SetContentType", &EchoPacket{context.SessionId, []byte(mime), 200}, &ack)
 }
 
+func (context *Context) WriteHeader(statusCode int) error {
+	if context.StatusCode != nil {
+		return errors.New("http status code already set")
+	}
+	context.StatusCode = &statusCode
+	return nil
+}
+
 func (context *Context) Write(buf []byte) (n int, err error) {
+	statusCode := 200
+	if context.StatusCode != nil {
+		statusCode = *context.StatusCode
+	}
 	var ack bool
-	err = context.Rpc("RequestSession.Write", &EchoPacket{context.SessionId, buf, 200}, &ack)
+	err = context.Rpc("RequestSession.Write", &EchoPacket{context.SessionId, buf, statusCode}, &ack)
 	n = len(buf)
 	return
 }

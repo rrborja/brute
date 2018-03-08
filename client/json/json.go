@@ -1,10 +1,10 @@
 package json
 
 import (
-	"github.com/silentred/gid"
 	"io"
 	"fmt"
 	"bufio"
+	"github.com/rrborja/brute/client"
 )
 
 type session struct {
@@ -158,13 +158,13 @@ type ResponseWriter interface {
 	Type() Type
 }
 
-var jsonWriterSession map[int64]ResponseWriter
+var jsonWriterSession map[client.SessionId]ResponseWriter
 
 func init() {
-	jsonWriterSession = make(map[int64]ResponseWriter)
+	jsonWriterSession = make(map[client.SessionId]ResponseWriter)
 }
 
-func AddSession(sessionId int64, writer io.Writer) (chan interface{}, chan interface{}) {
+func AddSession(sessionId client.SessionId, writer io.Writer) (chan interface{}, chan interface{}) {
 	endBuf := make(chan interface{})
 	waitBuf := make(chan interface{})
 
@@ -186,7 +186,7 @@ func AddSession(sessionId int64, writer io.Writer) (chan interface{}, chan inter
 	return endBuf, waitBuf
 }
 
-func CloseSession(sessionId int64) {
+func CloseSession(sessionId client.SessionId) {
 	s := jsonWriterSession[sessionId].(*session)
 
 	if s.listStream != nil {
@@ -199,14 +199,14 @@ func CloseSession(sessionId int64) {
 	<-s.waitBuf
 }
 
-func JsonWriterSession(sessionId int64) ResponseWriter {
+func JsonWriterSession(sessionId client.SessionId) ResponseWriter {
 	return jsonWriterSession[sessionId]
 }
 
 type ListFunc func()
 
 func List(value ...interface{}) ListFunc {
-	sessionId := gid.Get()
+	sessionId := client.Gid()
 	s := JsonWriterSession(sessionId)
 
 	callback := func() {
@@ -220,7 +220,7 @@ func List(value ...interface{}) ListFunc {
 }
 
 func Map(key string, value interface{}) {
-	sessionId := gid.Get()
+	sessionId := client.Gid()
 	JsonWriterSession(sessionId).Map(key, value)
 }
 

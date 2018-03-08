@@ -39,7 +39,6 @@ import (
 	"time"
 	"github.com/elazarl/go-bindata-assetfs"
 	"github.com/rrborja/brute/assets"
-	"html/template"
 	"strings"
 	"net/url"
 	. "github.com/rrborja/brute/log"
@@ -63,9 +62,6 @@ var endpoints CustomConcurrentMap
 
 var requestSession RequestSession
 
-var template404Page *template.Template
-var template700Page *template.Template
-
 type ConnWrite struct {
 	io.Reader
 	net.Conn
@@ -76,17 +72,21 @@ type CustomConcurrentMap struct {
 	sync.Map
 }
 
-func (customerConcurrentMap *CustomConcurrentMap) Load(key string) (ConnWriter, bool) {
-	value, ok := customerConcurrentMap.Map.Load(key)
+func (customConcurrentMap *CustomConcurrentMap) Load(key string) (ConnWriter, bool) {
+	value, ok := customConcurrentMap.Map.Load(key)
+	if !ok {
+		Log(fmt.Sprintf("the endpoint %s is off. please restart brute.io", key))
+		return nil, false
+	}
 	return value.(ConnWriter), ok
 }
 
-func (customerConcurrentMap *CustomConcurrentMap) Store(key string, value ConnWriter) {
-	customerConcurrentMap.Map.Store(key, value)
+func (customConcurrentMap *CustomConcurrentMap) Store(key string, value ConnWriter) {
+	customConcurrentMap.Map.Store(key, value)
 }
 
-func (customerConcurrentMap *CustomConcurrentMap) Delete(key string) {
-	customerConcurrentMap.Map.Delete(key)
+func (customConcurrentMap *CustomConcurrentMap) Delete(key string) {
+	customConcurrentMap.Map.Delete(key)
 }
 
 type ConnWriter interface {
@@ -104,13 +104,22 @@ func (connWriter *ConnWrite) Write(data []byte) (int, error) {
 type Config struct {
 	Name       string  `yaml:"name"`
 	Remote     string  `yaml:"remote"`
-	Authorizer string  `yaml:authorizer`
+	Authorizer *string  `yaml:authorizer`
 	Routes     []Route `yaml:,flow`
 }
 
 type Route struct {
 	Path      string `yaml:"path"`
 	Directory string `yaml:"directory"`
+	*RouteConfig 	 `yaml:"config"`
+
+	config *Config
+}
+
+type RouteConfig struct {
+	Protected bool `yaml:"protected"`
+	Timeout   string `yaml:"timeout"`
+	Activate  string `yaml:"activate"`
 }
 
 type ControllerEndpoint struct {
@@ -136,19 +145,6 @@ type EchoPacket struct {
 	SessionId [32]byte
 	Body      []byte
 	Code	  int
-}
-
-type DefaultHeadersHandler struct {
-	http.Handler
-}
-
-func defaultNotFoundHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(404)
-	template404Page.Execute(w, &struct{
-		ProjectName string
-		Path string
-		RandomNoun string
-	}{projectName, r.URL.Path, "MyEndpoint"})
 }
 
 func (sessions *RequestSession) AcceptRpc(id [32]byte, ack *struct{Method string; Message url.Values; Arguments map[string]string}) error {
@@ -193,10 +189,21 @@ func Delegate(w http.ResponseWriter, stream <-chan *EchoPacket) {
 				ProjectName string
 				Message string
 			}{projectName, string(buf.Body)})
+		case 40:
+			buffer := buf.Body
+			delimit := len(buffer)
+			for i, c := range buffer {
+				if c == '=' {
+					delimit = i
+					break
+				}
+			}
+			w.Header().Set(string(buffer[:delimit]), string(buffer[delimit+1:]))
 		default:
 			if len(buf.Body) >= 3 && string(buf.Body[:3]) == "~ct" {
 				w.Header().Set("Content-Type", string(buf.Body[3:]))
 			} else {
+				w.WriteHeader(buf.Code)
 				w.Write(buf.Body)
 			}
 		}
@@ -210,21 +217,6 @@ func init() {
 	}
 	cwd = _cwd
 	requestSession.store = make(map[[32]byte]*ContextHolder)
-
-	loadTemplates()
-}
-
-func loadTemplates() {
-	var data []byte
-	var err error
-
-	/* Parse 404 page template */
-	data, err = assets.Asset("static/default-pages/404/404.html"); check(err)
-	template404Page, err = template.New("404 Page Template").Parse(string(data)); check(err)
-
-	/* Parse 700 page template */
-	data, err = assets.Asset("static/default-pages/700/700.html"); check(err)
-	template700Page, err = template.New("700 Page Template").Parse(string(data)); check(err)
 }
 
 func New(config *Config) {
@@ -238,8 +230,9 @@ func New(config *Config) {
 	os.MkdirAll("bin/temp/broken", 0700)
 	os.MkdirAll("bin/build", 0700)
 
-	for _, route := range config.Routes {
-		buildEndpoint(route)
+	for i := range config.Routes {
+		config.Routes[i].config = config
+		buildEndpoint(config.Routes[i])
 	}
 
 	r = mux.NewRouter()
@@ -285,6 +278,10 @@ func rebuildRootEndpoint(route Route) (string, error) {
 		if _, err := os.Stat(routeDirectory); os.IsNotExist(err) {
 			return "", noSuchRouteError
 		}
+	} else if route.config != nil {
+		out = filepath.Join(cwd, tmpBuilds, *route.config.Authorizer)
+		routeDirectory = filepath.Join(cwd, "src", *route.config.Authorizer)
+		Log("Building a secure middleware " + *route.config.Authorizer)
 	} else {
 		out = filepath.Join(cwd, tmpBuilds, "root")
 		routeDirectory = filepath.Join(cwd, "src")
@@ -363,7 +360,7 @@ func buildEndpoint(route Route) {
 }
 
 func HostRootEndpoint() {
-	root := Route{"", "root"}
+	root := Route{Path: "", Directory: "root"}
 
 	buildEndpoint(root)
 	StartRootEndpoint(root)
@@ -381,7 +378,14 @@ func Deploy(config *Config) {
 		build := filepath.Join(cwd, "bin", "endpoints", route.Directory)
 
 		endpoint := &ControllerEndpoint{config.Name, route, build}
-		r.Handle(route.Path, endpoint).Name(route.Directory)
+		handleFunc := endpoint.ServeHTTP
+		if config.Authorizer != nil && route.RouteConfig != nil {
+			handleFunc = LoadAuthorizer(route).
+				Success(endpoint.ServeHTTP).
+					Failed(defaultUnauthorizedHandler).
+						Handler()
+		}
+		r.HandleFunc(route.Path, handleFunc).Name(route.Directory)
 	}
 
 	r.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
@@ -497,6 +501,18 @@ func (controller *ControllerEndpoint) ServeHTTP(w http.ResponseWriter, r *http.R
 	<-context.End
 }
 
+func StartAuthorizer(config *Config) {
+	if config.Authorizer == nil {
+		return
+	}
+
+	authorizerRoute := Route{Directory: *config.Authorizer, config: config}
+
+	buildEndpoint(authorizerRoute)
+	StartEndpoint(authorizerRoute)
+	LoadAuthorizer(authorizerRoute)
+}
+
 func StartEndpoints(config *Config) {
 	for _, route := range config.Routes {
 		StartEndpoint(route)
@@ -512,12 +528,17 @@ func StartRootEndpoint(route Route) {
 		out = filepath.Join(cwd, "bin", "endpoints", route.Directory)
 		env = fmt.Sprintf("ROUTE=%s", route.Directory)
 	} else {
-		out = filepath.Join(cwd, "bin", "endpoints", "root")
-		env = fmt.Sprintf("ROUTE=%s", "root")
+		if route.config == nil {
+			out = filepath.Join(cwd, "bin", "endpoints", "root")
+			env = fmt.Sprintf("ROUTE=%s", "root")
+		} else {
+			env = fmt.Sprintf("ROUTE=%s;AUTHORIZER=true", route.Directory)
+			out = filepath.Join(cwd, "bin", "endpoints", route.Directory)
+		}
 	}
 
 	cmd := exec.Command(out)
-	cmd.Env = []string{env}
+	cmd.Env = strings.Split(env, ";")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	//cmdOut, _ := cmd.StdoutPipe()
@@ -545,12 +566,12 @@ func RunEndpointService() net.Listener {
 			// Listen for an incoming connection.
 			conn, err := l.Accept()
 
-			Log("Incoming endpoint connection: " + conn.RemoteAddr().String())
-
 			if err != nil {
 				LogError(ErrorLog{err, fmt.Sprintf("Error accepting: %v", err.Error())})
 				continue
 			}
+
+			Log("Incoming endpoint connection: " + conn.RemoteAddr().String())
 
 			bin := make([]byte, 5)
 			conn.Read(bin)

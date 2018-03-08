@@ -4,25 +4,29 @@ import (
 	"testing"
 	"github.com/stretchr/testify/assert"
 	"bytes"
-	"github.com/silentred/gid"
+	"github.com/rrborja/brute/client"
 )
 
 func TestJsonObject(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	Map("key1", "value1")
 	Map("key2", 2)
 	Map("key3", false)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `{"key1":"value1","key2":2,"key3":false}`, reader.String())
 }
 
 func TestJsonObjectWithSecondDepth(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	Map("k1", "v1")
 	Map("k2", func() {
@@ -32,14 +36,16 @@ func TestJsonObjectWithSecondDepth(t *testing.T) {
 	})
 	Map("k3", true)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `{"k1":"v1","k2":{"k2.3":"v2.3"},"k3":true}`, reader.String())
 }
 
 func TestJsonObjectWithSecondDepthMultipleElements(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	Map("k1", "v1")
 	Map("k2", func() {
@@ -56,14 +62,16 @@ func TestJsonObjectWithSecondDepthMultipleElements(t *testing.T) {
 	})
 	Map("k3", true)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `{"k1":"v1","k2":{"k2.3":"v2.3","k2.4":"v2.4","anotherDepth":{"k4":"reached"}},"k3":true}`, reader.String())
 }
 
 func TestJsonList(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	List(
 		Element(func() {
@@ -73,14 +81,16 @@ func TestJsonList(t *testing.T) {
 		Element(false),
 	)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `[{"key1":"val1"},{"key2":true},false]`, reader.String())
 }
 
 func TestMapWithList(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	Map(
 		"list", List(1,2,3),
@@ -89,14 +99,16 @@ func TestMapWithList(t *testing.T) {
 		"element", true,
 	)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `{"list":[1,2,3],"element":true}`, reader.String())
 }
 
 func TestListWithinList(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	List(
 		Element(
@@ -104,14 +116,16 @@ func TestListWithinList(t *testing.T) {
 		4,5,
 	)
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `[[1,2,3],4,5]`, reader.String())
 }
 
 func TestListAndAnotherList(t *testing.T) {
+	sessionId := client.Gid()
+
 	reader := bytes.NewBufferString("")
-	AddSession(gid.Get(), reader)
+	AddSession(sessionId, reader)
 
 	List(
 		1,2,3,
@@ -120,7 +134,7 @@ func TestListAndAnotherList(t *testing.T) {
 		4,5,
 	)()
 
-	CloseSession(gid.Get())
+	CloseSession(sessionId)
 
 	assert.Equal(t, `[1,2,3,4,5]`, reader.String())
 }
