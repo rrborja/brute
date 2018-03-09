@@ -417,7 +417,7 @@ func Deploy(config *Config) {
 	HostRootEndpoint()
 
 	srv := &http.Server{Addr: ":"+strconv.Itoa(httpPort), Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
-		target := fmt.Sprintf("https://%s:%d%s", req.Host, httpPort, req.URL.Path)
+		target := fmt.Sprintf("https://%s:%d%s", req.Host, httpsPort, req.URL.Path)
 		if len(req.URL.RawQuery) > 0 {
 			target += "?" + req.URL.RawQuery
 		}
