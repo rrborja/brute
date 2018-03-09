@@ -62,6 +62,11 @@ var endpoints CustomConcurrentMap
 
 var requestSession RequestSession
 
+var (
+	httpPort int = 8080
+	httpsPort int = 8443
+)
+
 type ConnWrite struct {
 	io.Reader
 	net.Conn
@@ -70,6 +75,14 @@ type ConnWrite struct {
 
 type CustomConcurrentMap struct {
 	sync.Map
+}
+
+func SetHttpPort(port int) {
+	httpPort = port
+}
+
+func SetSecureHttpPort(port int) {
+	httpsPort = port
 }
 
 func (customConcurrentMap *CustomConcurrentMap) Load(key string) (ConnWriter, bool) {
@@ -403,8 +416,8 @@ func Deploy(config *Config) {
 
 	HostRootEndpoint()
 
-	srv := &http.Server{Addr: ":8080", Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
-		target := "https://" + req.Host + req.URL.Path
+	srv := &http.Server{Addr: ":"+strconv.Itoa(httpPort), Handler: http.HandlerFunc(func (w http.ResponseWriter, req *http.Request) {
+		target := fmt.Sprintf("https://%s:%d%s", req.Host, httpPort, req.URL.Path)
 		if len(req.URL.RawQuery) > 0 {
 			target += "?" + req.URL.RawQuery
 		}
@@ -418,7 +431,7 @@ func Deploy(config *Config) {
 
 	go srv.ListenAndServe()
 
-	secureSrv := &http.Server{Addr: ":8443", Handler: r}
+	secureSrv := &http.Server{Addr: ":" + strconv.Itoa(httpsPort), Handler: r}
 	secureSrv.SetKeepAlivesEnabled(true)
 	secureSrv.ListenAndServeTLS("cert.pem", "tls.key")
 }

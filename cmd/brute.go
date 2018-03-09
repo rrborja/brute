@@ -102,9 +102,20 @@ func ProcessArgument(args ...string) error {
 		return ProcessTypeForUpdate(args[1:]...)
 	case "legal":
 		return ProcessLegalMenu(args[1:]...)
+	case "live":
+		return DeployAsLive(args[1:]...)
 	default:
 		return fmt.Errorf("unknown command: %v", args[0])
 	}
+}
+
+func DeployAsLive(args ...string) error {
+	if len(args) > 0 {
+		errors.New("unknown additional args: " + strings.Join(args, ", "))
+	}
+	brute.SetHttpPort(80)
+	brute.SetSecureHttpPort(443)
+	return errors.New("deploy")
 }
 
 func ProcessLegalMenu(args ...string) error {

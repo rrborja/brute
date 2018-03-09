@@ -24,7 +24,7 @@ func main() {
 
 	if len(os.Args) > 1 {
 		if err := ProcessArgument(os.Args[1:]...); err != nil {
-			if err != nil {
+			if err.Error() != "deploy" {
 				log.Fatal(err)
 			}
 		} else {
